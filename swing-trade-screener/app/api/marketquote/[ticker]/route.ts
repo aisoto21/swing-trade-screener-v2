@@ -7,19 +7,19 @@ export async function GET(
   const { ticker } = await params;
 
   try {
-    const yahooFinance = (await import("yahoo-finance2")).default;
-    yahooFinance.suppressNotices(["yahooSurvey"]);
+    const yf = await import("yahoo-finance2");
+    const yahooFinance = yf.default ?? yf;
 
     const q = await yahooFinance.quote(ticker);
 
-    // Yahoo returns post/pre-market price in these fields
     const extPrice = q.postMarketPrice ?? q.preMarketPrice ?? null;
     const extChange = q.postMarketChangePercent ?? q.preMarketChangePercent ?? null;
+    const extAbsChange = q.postMarketChange ?? q.preMarketChange ?? null;
     const regularPrice = q.regularMarketPrice ?? 0;
 
     const displayPrice = extPrice ?? regularPrice;
     const displayChangePercent = extChange ?? q.regularMarketChangePercent ?? 0;
-    const displayChange = q.postMarketChange ?? q.preMarketChange ?? q.regularMarketChange ?? 0;
+    const displayChange = extAbsChange ?? q.regularMarketChange ?? 0;
 
     return Response.json(
       {
