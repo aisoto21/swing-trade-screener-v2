@@ -1,11 +1,13 @@
 import { Suspense } from "react";
 import AnalysisPageClient from "./AnalysisPageClient.tsx";
 
-export default function AnalysisPage({
+export default async function AnalysisPage({
   params,
 }: {
   params: Promise<{ ticker: string }>;
 }) {
+  const { ticker } = await params;
+
   return (
     <Suspense
       fallback={
@@ -14,7 +16,7 @@ export default function AnalysisPage({
         </div>
       }
     >
-      <AnalysisPageClient params={params} />
+      <AnalysisPageClient ticker={ticker} />
     </Suspense>
   );
 }
