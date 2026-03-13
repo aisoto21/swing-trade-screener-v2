@@ -17,12 +17,12 @@ export async function fetchOHLCV(
     return generateMockOHLCV(ticker, timeframe, bars);
   }
 
+  const barsNeeded = timeframe === "1D" ? DAILY_BARS : timeframe === "4H" ? FOUR_HOUR_BARS : FIFTEEN_MIN_BARS;
+
   try {
     const yahooFinance = await import("yahoo-finance2").then((m) => m.default);
     const period1 = new Date();
     period1.setFullYear(period1.getFullYear() - 1);
-
-    const barsNeeded = timeframe === "1D" ? DAILY_BARS : timeframe === "4H" ? FOUR_HOUR_BARS : FIFTEEN_MIN_BARS;
 
     if (timeframe === "1D") {
       const result = await yahooFinance.historical(ticker, {
