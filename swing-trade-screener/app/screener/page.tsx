@@ -25,23 +25,18 @@ const DEFAULT_FILTERS: ScreenerFilters = {
 };
 
 function getTradeOfTheDay(results: ScreenerResult[]): ScreenerResult | null {
-  if (results.length === 0) return null;
-  const aPlus = results.filter((r) => r.primarySetup.grade === "A+");
-  if (aPlus.length > 0) {
-    return aPlus.sort(
-      (a, b) =>
-        (b.primarySetup.confirmingFactors.length +
-          (b.primarySetup.tradeParams.riskReward.toT1 || 0)) -
-        (a.primarySetup.confirmingFactors.length +
-          (a.primarySetup.tradeParams.riskReward.toT1 || 0))
-    )[0];
-  }
-  return results.sort(
+  const valid = results.filter(
+    (r) => r?.primarySetup?.tradeParams?.riskReward?.toT1 != null
+  );
+  if (valid.length === 0) return null;
+  const aPlus = valid.filter((r) => r.primarySetup?.grade === "A+");
+  const toSort = aPlus.length > 0 ? aPlus : valid;
+  return toSort.sort(
     (a, b) =>
-      (b.primarySetup.confirmingFactors.length +
-        (b.primarySetup.tradeParams.riskReward.toT1 || 0)) -
-      (a.primarySetup.confirmingFactors.length +
-        (a.primarySetup.tradeParams.riskReward.toT1 || 0))
+      ((b.primarySetup?.confirmingFactors?.length ?? 0) +
+        (b.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0)) -
+      ((a.primarySetup?.confirmingFactors?.length ?? 0) +
+        (a.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0))
   )[0];
 }
 
@@ -100,7 +95,19 @@ export default function ScreenerPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [optionsLayer, optionsMode, results, filters.accountSize, filters.riskPerTrade, settings]);
+  }, [
+    optionsLayer,
+    optionsMode,
+    results,
+    filters.accountSize,
+    filters.riskPerTrade,
+    settings.optionsMinIVP,
+    settings.optionsMinOI,
+    settings.optionsDTEMultiplier,
+    settings.optionsAllowNaked,
+    settings.optionsAllowSpreads,
+    settings.optionsAllowPMCC,
+  ]);
 
   const runScreener = useCallback(async () => {
     setIsLoading(true);
@@ -152,6 +159,7 @@ export default function ScreenerPage() {
       setProgress({ current: SCREENING_UNIVERSE.length, total: SCREENING_UNIVERSE.length });
     } catch (err) {
       console.error(err);
+      setResults([]);
     } finally {
       setIsLoading(false);
     }
