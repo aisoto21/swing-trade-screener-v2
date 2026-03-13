@@ -6,15 +6,12 @@ import { generateMockOHLCV } from "@/lib/utils/mockData";
 const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
 const FINNHUB_BASE = "https://finnhub.io/api/v1";
 
-function toFinnhubResolution(timeframe: Timeframe): string {
-  if (timeframe === "1D") return "D";
-  if (timeframe === "4H") return "60"; // fetch 1H, aggregate to 4H
-  return "15"; // 15M
-}
+const TWELVE_DATA_API_KEY = process.env.TWELVE_DATA_API_KEY ?? "";
+const TWELVE_DATA_BASE = "https://api.twelvedata.com";
 
 /**
- * Fetch OHLCV data from Finnhub.
- * Falls back to mock data only when API key is missing or call fails.
+ * Fetch OHLCV via Finnhub (1D and 4H) or Twelve Data (15M).
+ * Falls back to mock data only when the relevant API key is missing or the call fails.
  */
 export async function fetchOHLCV(
   ticker: string,
@@ -28,16 +25,34 @@ export async function fetchOHLCV(
       ? FOUR_HOUR_BARS
       : FIFTEEN_MIN_BARS;
 
-  if (useMock || !FINNHUB_API_KEY) {
+  if (useMock) {
+    return generateMockOHLCV(ticker, timeframe, barsNeeded);
+  }
+
+  if (timeframe === "15M") {
+    return fetchTwelveData15M(ticker, barsNeeded);
+  }
+
+  return fetchFinnhub(ticker, timeframe, barsNeeded);
+}
+
+// ─── Finnhub: 1D and 4H ──────────────────────────────────────────────────────
+
+async function fetchFinnhub(
+  ticker: string,
+  timeframe: Timeframe,
+  barsNeeded: number
+): Promise<OHLCVBar[]> {
+  if (!FINNHUB_API_KEY) {
     return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 
   try {
-    const resolution = toFinnhubResolution(timeframe);
+    // 4H: fetch 1H candles and aggregate; 1D: fetch daily candles
+    const resolution = timeframe === "1D" ? "D" : "60";
     const toTs = Math.floor(Date.now() / 1000);
-    const lookbackDays =
-      timeframe === "1D" ? 400 : timeframe === "4H" ? 120 : 30;
-    const fromTs = toTs - lookbackDays * 24 * 60 * 60;
+    const lookback = timeframe === "1D" ? 400 : 60; // days
+    const fromTs = toTs - lookback * 24 * 60 * 60;
 
     const url = `${FINNHUB_BASE}/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${fromTs}&to=${toTs}&token=${FINNHUB_API_KEY}`;
     const res = await fetch(url);
@@ -45,7 +60,6 @@ export async function fetchOHLCV(
     if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
 
     const data = await res.json();
-
     if (data.s !== "ok" || !data.t || data.t.length === 0) {
       throw new Error(`Finnhub no data: ${data.s}`);
     }
@@ -65,13 +79,58 @@ export async function fetchOHLCV(
 
     return mapped.slice(-barsNeeded);
   } catch (err) {
-    console.error(
-      `[dataFetcher] Finnhub failed for ${ticker} (${timeframe}):`,
-      err
-    );
+    console.error(`[dataFetcher] Finnhub failed for ${ticker} (${timeframe}):`, err);
     return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 }
+
+// ─── Twelve Data: 15M ────────────────────────────────────────────────────────
+
+async function fetchTwelveData15M(
+  ticker: string,
+  barsNeeded: number
+): Promise<OHLCVBar[]> {
+  if (!TWELVE_DATA_API_KEY) {
+    return generateMockOHLCV(ticker, "15M", barsNeeded);
+  }
+
+  try {
+    // Free tier returns up to 5000 bars per call; 14 days of 15M = ~390 bars
+    const url = `${TWELVE_DATA_BASE}/time_series?symbol=${ticker}&interval=15min&outputsize=${barsNeeded}&apikey=${TWELVE_DATA_API_KEY}&format=JSON`;
+    const res = await fetch(url);
+
+    if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    if (data.status === "error") {
+      throw new Error(`Twelve Data error: ${data.message}`);
+    }
+
+    if (!data.values || data.values.length === 0) {
+      throw new Error("Twelve Data returned no values");
+    }
+
+    // Twelve Data returns newest-first; reverse to oldest-first
+    const mapped: OHLCVBar[] = data.values
+      .reverse()
+      .map((bar: { datetime: string; open: string; high: string; low: string; close: string; volume: string }) => ({
+        date: new Date(bar.datetime).toISOString(),
+        open: parseFloat(bar.open),
+        high: parseFloat(bar.high),
+        low: parseFloat(bar.low),
+        close: parseFloat(bar.close),
+        volume: parseFloat(bar.volume) || 0,
+      }));
+
+    return mapped.slice(-barsNeeded);
+  } catch (err) {
+    console.error(`[dataFetcher] Twelve Data failed for ${ticker} (15M):`, err);
+    return generateMockOHLCV(ticker, "15M", barsNeeded);
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function aggregateTo4H(bars: OHLCVBar[]): OHLCVBar[] {
   const result: OHLCVBar[] = [];
