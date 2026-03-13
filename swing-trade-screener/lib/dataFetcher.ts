@@ -3,15 +3,10 @@ import type { Timeframe } from "@/types";
 import { DAILY_BARS, FOUR_HOUR_BARS, FIFTEEN_MIN_BARS } from "@/constants/indicators";
 import { generateMockOHLCV } from "@/lib/utils/mockData";
 
-const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
-const FINNHUB_BASE = "https://finnhub.io/api/v1";
-
-const TWELVE_DATA_API_KEY = process.env.TWELVE_DATA_API_KEY ?? "";
-const TWELVE_DATA_BASE = "https://api.twelvedata.com";
-
 /**
- * Fetch OHLCV via Finnhub (1D and 4H) or Twelve Data (15M).
- * Falls back to mock data only when the relevant API key is missing or the call fails.
+ * Fetch OHLCV via Yahoo Finance (yahoo-finance2).
+ * Completely free, no API key required.
+ * Falls back to mock data only if the fetch fails.
  */
 export async function fetchOHLCV(
   ticker: string,
@@ -29,104 +24,73 @@ export async function fetchOHLCV(
     return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 
-  if (timeframe === "15M") {
-    return fetchTwelveData15M(ticker, barsNeeded);
-  }
-
-  return fetchFinnhub(ticker, timeframe, barsNeeded);
+  return fetchYahooFinance(ticker, timeframe, barsNeeded);
 }
 
-// ─── Finnhub: 1D and 4H ──────────────────────────────────────────────────────
+// ─── Yahoo Finance ────────────────────────────────────────────────────────────
 
-async function fetchFinnhub(
+async function fetchYahooFinance(
   ticker: string,
   timeframe: Timeframe,
   barsNeeded: number
 ): Promise<OHLCVBar[]> {
-  if (!FINNHUB_API_KEY) {
-    return generateMockOHLCV(ticker, timeframe, barsNeeded);
-  }
-
   try {
-    // 4H: fetch 1H candles and aggregate; 1D: fetch daily candles
-    const resolution = timeframe === "1D" ? "D" : "60";
-    const toTs = Math.floor(Date.now() / 1000);
-    const lookback = timeframe === "1D" ? 400 : 60; // days
-    const fromTs = toTs - lookback * 24 * 60 * 60;
+    // Dynamic import so it only runs server-side
+    const yahooFinance = (await import("yahoo-finance2")).default;
 
-    const url = `${FINNHUB_BASE}/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${fromTs}&to=${toTs}&token=${FINNHUB_API_KEY}`;
-    const res = await fetch(url);
+    // Suppress the survey/notice that yahoo-finance2 logs
+    yahooFinance.suppressNotices(["yahooSurvey"]);
 
-    if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
+    // Map our timeframe to Yahoo interval + how far back to look
+    const interval =
+      timeframe === "1D" ? "1d" : timeframe === "4H" ? "1h" : "15m";
 
-    const data = await res.json();
-    if (data.s !== "ok" || !data.t || data.t.length === 0) {
-      throw new Error(`Finnhub no data: ${data.s}`);
+    // How many days of history to request
+    const lookbackDays =
+      timeframe === "1D"
+        ? barsNeeded + 50           // extra buffer for weekends/holidays
+        : timeframe === "4H"
+        ? Math.ceil((barsNeeded * 4) / 6.5) + 10  // ~6.5 trading hours/day
+        : Math.ceil((barsNeeded * 0.25) / 6.5) + 5;
+
+    const period1 = new Date();
+    period1.setDate(period1.getDate() - lookbackDays);
+
+    const result = await yahooFinance.chart(ticker, {
+      period1,
+      interval: interval as "1d" | "1h" | "15m",
+    });
+
+    if (!result?.quotes || result.quotes.length === 0) {
+      throw new Error(`Yahoo Finance returned no data for ${ticker}`);
     }
 
-    let mapped: OHLCVBar[] = data.t.map((ts: number, i: number) => ({
-      date: new Date(ts * 1000).toISOString(),
-      open: data.o[i],
-      high: data.h[i],
-      low: data.l[i],
-      close: data.c[i],
-      volume: data.v[i] ?? 0,
-    }));
-
-    if (timeframe === "4H") {
-      mapped = aggregateTo4H(mapped);
-    }
-
-    return mapped.slice(-barsNeeded);
-  } catch (err) {
-    console.error(`[dataFetcher] Finnhub failed for ${ticker} (${timeframe}):`, err);
-    return generateMockOHLCV(ticker, timeframe, barsNeeded);
-  }
-}
-
-// ─── Twelve Data: 15M ────────────────────────────────────────────────────────
-
-async function fetchTwelveData15M(
-  ticker: string,
-  barsNeeded: number
-): Promise<OHLCVBar[]> {
-  if (!TWELVE_DATA_API_KEY) {
-    return generateMockOHLCV(ticker, "15M", barsNeeded);
-  }
-
-  try {
-    // Free tier returns up to 5000 bars per call; 14 days of 15M = ~390 bars
-    const url = `${TWELVE_DATA_BASE}/time_series?symbol=${ticker}&interval=15min&outputsize=${barsNeeded}&apikey=${TWELVE_DATA_API_KEY}&format=JSON`;
-    const res = await fetch(url);
-
-    if (!res.ok) throw new Error(`Twelve Data HTTP ${res.status}`);
-
-    const data = await res.json();
-
-    if (data.status === "error") {
-      throw new Error(`Twelve Data error: ${data.message}`);
-    }
-
-    if (!data.values || data.values.length === 0) {
-      throw new Error("Twelve Data returned no values");
-    }
-
-    // Twelve Data returns newest-first; reverse to oldest-first
-    const mapped: OHLCVBar[] = data.values
-      .reverse()
-      .map((bar: { datetime: string; open: string; high: string; low: string; close: string; volume: string }) => ({
-        date: new Date(bar.datetime).toISOString(),
-        open: parseFloat(bar.open),
-        high: parseFloat(bar.high),
-        low: parseFloat(bar.low),
-        close: parseFloat(bar.close),
-        volume: parseFloat(bar.volume) || 0,
+    let bars: OHLCVBar[] = result.quotes
+      .filter(
+        (q) =>
+          q.open != null &&
+          q.high != null &&
+          q.low != null &&
+          q.close != null
+      )
+      .map((q) => ({
+        date: new Date(q.date).toISOString(),
+        open: q.open as number,
+        high: q.high as number,
+        low: q.low as number,
+        close: q.close as number,
+        volume: q.volume ?? 0,
       }));
 
-    return mapped.slice(-barsNeeded);
+    // For 4H: Yahoo only provides 1H candles — aggregate to 4H
+    if (timeframe === "4H") {
+      bars = aggregateTo4H(bars);
+    }
+
+    return bars.slice(-barsNeeded);
   } catch (err) {
-    console.error(`[dataFetcher] Twelve Data failed for ${ticker} (15M):`, err);
-    return generateMockOHLCV(ticker, "15M", barsNeeded);
+    console.error(`[dataFetcher] Yahoo Finance failed for ${ticker} (${timeframe}):`, err);
+    return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 }
 
