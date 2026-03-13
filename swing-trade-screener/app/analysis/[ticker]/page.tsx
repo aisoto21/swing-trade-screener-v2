@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import AnalysisPageClient from "./AnalysisPageClient";
+import AnalysisPageClient from "./AnalysisPageClient.tsx";
 
 export default function AnalysisPage({
   params,
