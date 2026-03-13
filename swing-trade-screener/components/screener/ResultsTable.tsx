@@ -46,36 +46,43 @@ export function ResultsTable({
   const [clickedTicker, setClickedTicker] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
-    return [...results].sort((a, b) => {
-      let va: number | string;
-      let vb: number | string;
+    const valid = results.filter(
+      (r) => r?.primarySetup?.tradeParams != null
+    );
+    return [...valid].sort((a, b) => {
+      let va: number | string | undefined;
+      let vb: number | string | undefined;
+      const ap = a.primarySetup;
+      const bp = b.primarySetup;
+      const atp = ap?.tradeParams;
+      const btp = bp?.tradeParams;
       if (sortKey === "grade") {
-        const order = { "A+": 4, A: 3, B: 2, C: 1 };
-        va = order[a.primarySetup.grade];
-        vb = order[b.primarySetup.grade];
+        const order: Record<string, number> = { "A+": 4, A: 3, B: 2, C: 1 };
+        va = order[ap?.grade ?? ""] ?? 0;
+        vb = order[bp?.grade ?? ""] ?? 0;
       } else if (sortKey === "rr") {
-        va = a.primarySetup.tradeParams.riskReward.toT1;
-        vb = b.primarySetup.tradeParams.riskReward.toT1;
+        va = atp?.riskReward?.toT1 ?? 0;
+        vb = btp?.riskReward?.toT1 ?? 0;
       } else if (sortKey === "price") {
-        va = a.price;
-        vb = b.price;
+        va = a.price ?? 0;
+        vb = b.price ?? 0;
       } else if (sortKey === "ticker") {
-        va = a.ticker;
-        vb = b.ticker;
+        va = a.ticker ?? "";
+        vb = b.ticker ?? "";
       } else if (sortKey === "entry") {
-        va = a.primarySetup.tradeParams.entry.zone[0];
-        vb = b.primarySetup.tradeParams.entry.zone[0];
+        va = atp?.entry?.zone?.[0] ?? 0;
+        vb = btp?.entry?.zone?.[0] ?? 0;
       } else if (sortKey === "stop") {
-        va = a.primarySetup.tradeParams.stop.price;
-        vb = b.primarySetup.tradeParams.stop.price;
+        va = atp?.stop?.price ?? 0;
+        vb = btp?.stop?.price ?? 0;
       } else {
-        va = a.primarySetup.tradeParams.holdDuration;
-        vb = b.primarySetup.tradeParams.holdDuration;
+        va = atp?.holdDuration ?? "";
+        vb = btp?.holdDuration ?? "";
       }
       if (typeof va === "number" && typeof vb === "number") {
         return sortDir === "asc" ? va - vb : vb - va;
       }
-      const cmp = String(va).localeCompare(String(vb));
+      const cmp = String(va ?? "").localeCompare(String(vb ?? ""));
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [results, sortKey, sortDir]);
@@ -213,11 +220,11 @@ export function ResultsTable({
                   className={cn(
                     "animate-row-enter border-b border-[var(--border-default)] transition-colors",
                     i % 2 === 1 && "bg-[var(--background-subtle)]",
-                    r.primarySetup.bias === "LONG" && "border-l-[3px] border-l-[var(--signal-long-muted)]",
-                    r.primarySetup.bias === "SHORT" && "border-l-[3px] border-l-[var(--signal-short-muted)]",
+                    r.primarySetup?.bias === "LONG" && "border-l-[3px] border-l-[var(--signal-long-muted)]",
+                    r.primarySetup?.bias === "SHORT" && "border-l-[3px] border-l-[var(--signal-short-muted)]",
                     "hover:bg-[var(--background-subtle)]",
-                    clickedTicker === r.ticker && r.primarySetup.bias === "LONG" && "bg-[var(--signal-long-muted)]",
-                    clickedTicker === r.ticker && r.primarySetup.bias === "SHORT" && "bg-[var(--signal-short-muted)]"
+                    clickedTicker === r.ticker && r.primarySetup?.bias === "LONG" && "bg-[var(--signal-long-muted)]",
+                    clickedTicker === r.ticker && r.primarySetup?.bias === "SHORT" && "bg-[var(--signal-short-muted)]"
                   )}
                   style={{ animationDelay: `${Math.min(i * 20, 400)}ms` }}
                 >
@@ -237,22 +244,22 @@ export function ResultsTable({
                   </td>
                   <td className="w-[100px] px-3 py-2">
                     <span className="font-mono text-sm tabular-nums text-[var(--text-primary)]">
-                      {formatCurrency(r.price)}
+                      {formatCurrency(r.price ?? 0)}
                     </span>
                     <p
                       className={cn(
                         "font-mono text-xs tabular-nums",
-                        r.priceChangePercent >= 0 ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]"
+                        (r.priceChangePercent ?? 0) >= 0 ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]"
                       )}
                     >
-                      {r.priceChangePercent >= 0 ? "↑" : "↓"} {formatPercent(r.priceChangePercent, true)}
+                      {(r.priceChangePercent ?? 0) >= 0 ? "↑" : "↓"} {formatPercent(r.priceChangePercent ?? 0, true)}
                     </p>
                   </td>
                   <td className="w-[160px] px-3 py-2">
-                    <SetupBadge setup={r.primarySetup} />
+                    <SetupBadge setup={r.primarySetup!} />
                   </td>
                   <td className="w-[64px] px-3 py-2">
-                    <GradeBadge grade={r.primarySetup.grade} />
+                    <GradeBadge grade={r.primarySetup?.grade ?? "C"} />
                   </td>
                   {showOptionsCols && (() => {
                     const rec = optionsRecommendations[r.ticker];
@@ -312,20 +319,20 @@ export function ResultsTable({
                     );
                   })()}
                   <td className="w-[130px] px-3 py-2 font-mono text-xs tabular-nums">
-                    {formatCurrency(r.primarySetup.tradeParams.entry.zone[0])} – {formatCurrency(r.primarySetup.tradeParams.entry.zone[1])}
+                    {formatCurrency(r.primarySetup?.tradeParams?.entry?.zone?.[0] ?? 0)} – {formatCurrency(r.primarySetup?.tradeParams?.entry?.zone?.[1] ?? 0)}
                   </td>
                   <td className="w-[110px] px-3 py-2 font-mono text-xs tabular-nums text-[var(--signal-short)]">
-                    {formatCurrency(r.primarySetup.tradeParams.stop.price)} ({formatPercent(r.primarySetup.tradeParams.stop.riskPercent)})
+                    {formatCurrency(r.primarySetup?.tradeParams?.stop?.price ?? 0)} ({formatPercent(r.primarySetup?.tradeParams?.stop?.riskPercent ?? 0)})
                   </td>
                   <td className="w-[140px] px-3 py-2 font-mono text-xs tabular-nums text-[var(--signal-long)]">
-                    {formatCurrency(r.primarySetup.tradeParams.targets.t1.price)} / {formatCurrency(r.primarySetup.tradeParams.targets.t2.price)}
+                    {formatCurrency(r.primarySetup?.tradeParams?.targets?.t1?.price ?? 0)} / {formatCurrency(r.primarySetup?.tradeParams?.targets?.t2?.price ?? 0)}
                   </td>
-                  <td className={`w-[72px] px-3 py-2 font-mono text-xs tabular-nums ${getRRColor(r.primarySetup.tradeParams.riskReward.toT1)}`}>
-                    {r.primarySetup.tradeParams.riskReward.toT1.toFixed(1)}:1
+                    <td className={`w-[72px] px-3 py-2 font-mono text-xs tabular-nums ${getRRColor(r.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0)}`}>
+                    {(r.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0).toFixed(1)}:1
                   </td>
                   <td className="w-[96px] px-3 py-2">
                     <span className="rounded-full bg-[var(--background-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
-                      {r.primarySetup.tradeParams.holdDuration}
+                      {r.primarySetup?.tradeParams?.holdDuration ?? "—"}
                     </span>
                   </td>
                   <td className={`w-[100px] px-3 py-2 font-mono text-xs tabular-nums ${getVolColor(r.volumeVsAvg)}`}>
@@ -333,11 +340,11 @@ export function ResultsTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
-                      {r.keyConfirmingFactors.slice(0, 3).map((f, j) => (
+                      {(r.keyConfirmingFactors ?? []).slice(0, 3).map((f, j) => (
                         <span
                           key={j}
                           className="rounded bg-[var(--background-subtle)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-muted)]"
-                          title={r.keyConfirmingFactors.join(", ")}
+                          title={(r.keyConfirmingFactors ?? []).join(", ")}
                         >
                           {f}
                         </span>
