@@ -2,12 +2,8 @@ import type { OHLCVBar } from "@/types";
 import type { Timeframe } from "@/types";
 import { DAILY_BARS, FOUR_HOUR_BARS, FIFTEEN_MIN_BARS } from "@/constants/indicators";
 import { generateMockOHLCV } from "@/lib/utils/mockData";
+import yahooFinance from "yahoo-finance2";
 
-/**
- * Fetch OHLCV via Yahoo Finance (yahoo-finance2).
- * Completely free, no API key required.
- * Falls back to mock data only if the fetch fails.
- */
 export async function fetchOHLCV(
   ticker: string,
   timeframe: Timeframe,
@@ -27,28 +23,20 @@ export async function fetchOHLCV(
   return fetchYahooFinance(ticker, timeframe, barsNeeded);
 }
 
-// ─── Yahoo Finance ────────────────────────────────────────────────────────────
-
 async function fetchYahooFinance(
   ticker: string,
   timeframe: Timeframe,
   barsNeeded: number
 ): Promise<OHLCVBar[]> {
   try {
-    // Dynamic import so it only runs server-side
-    const yf = await import("yahoo-finance2");
-    const yahooFinance = yf.default ?? yf;
-
-    // Map our timeframe to Yahoo interval + how far back to look
     const interval =
       timeframe === "1D" ? "1d" : timeframe === "4H" ? "1h" : "15m";
 
-    // How many days of history to request
     const lookbackDays =
       timeframe === "1D"
-        ? barsNeeded + 50           // extra buffer for weekends/holidays
+        ? barsNeeded + 50
         : timeframe === "4H"
-        ? Math.ceil((barsNeeded * 4) / 6.5) + 10  // ~6.5 trading hours/day
+        ? Math.ceil((barsNeeded * 4) / 6.5) + 10
         : Math.ceil((barsNeeded * 0.25) / 6.5) + 5;
 
     const period1 = new Date();
@@ -80,7 +68,6 @@ async function fetchYahooFinance(
         volume: q.volume ?? 0,
       }));
 
-    // For 4H: Yahoo only provides 1H candles — aggregate to 4H
     if (timeframe === "4H") {
       bars = aggregateTo4H(bars);
     }
@@ -91,8 +78,6 @@ async function fetchYahooFinance(
     return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function aggregateTo4H(bars: OHLCVBar[]): OHLCVBar[] {
   const result: OHLCVBar[] = [];
