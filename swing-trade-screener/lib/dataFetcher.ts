@@ -36,10 +36,8 @@ async function fetchYahooFinance(
 ): Promise<OHLCVBar[]> {
   try {
     // Dynamic import so it only runs server-side
-    const yahooFinance = (await import("yahoo-finance2")).default;
-
-    // Suppress the survey/notice that yahoo-finance2 logs
-    yahooFinance.suppressNotices(["yahooSurvey"]);
+    const yf = await import("yahoo-finance2");
+    const yahooFinance = yf.default ?? yf;
 
     // Map our timeframe to Yahoo interval + how far back to look
     const interval =
