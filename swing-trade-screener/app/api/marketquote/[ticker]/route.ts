@@ -7,40 +7,35 @@ export async function GET(
   const { ticker } = await params;
 
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+    // v7/finance/quote returns real-time + extended hours fields reliably
+    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketPreviousClose,postMarketPrice,postMarketChange,postMarketChangePercent,preMarketPrice,preMarketChange,preMarketChangePercent`;
     const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-      },
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
       next: { revalidate: 60 },
     });
 
     if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
 
     const data = await res.json();
-    const meta = data?.chart?.result?.[0]?.meta;
-    if (!meta) throw new Error("No data returned from Yahoo");
+    const q = data?.quoteResponse?.result?.[0];
+    if (!q) throw new Error("No quote data returned");
 
-    // Yahoo meta fields:
-    // regularMarketPrice - current/last regular session price
-    // postMarketPrice    - after hours price (if available)
-    // preMarketPrice     - pre-market price (if available)
-    // chartPreviousClose - previous close
-    const regularPrice: number = meta.regularMarketPrice ?? 0;
-    const extPrice: number | null = meta.postMarketPrice ?? meta.preMarketPrice ?? null;
-    const prevClose: number = meta.chartPreviousClose ?? meta.previousClose ?? regularPrice;
+    const regularPrice: number = q.regularMarketPrice ?? 0;
+    const extPrice: number | null = q.postMarketPrice ?? q.preMarketPrice ?? null;
+    const extChange: number | null = q.postMarketChange ?? q.preMarketChange ?? null;
+    const extChangePct: number | null = q.postMarketChangePercent ?? q.preMarketChangePercent ?? null;
+    const prevClose: number = q.regularMarketPreviousClose ?? regularPrice;
 
     const displayPrice = extPrice ?? regularPrice;
-    const change = displayPrice - prevClose;
-    const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+    const displayChange = extChange ?? q.regularMarketChange ?? 0;
+    const displayChangePct = extChangePct ?? q.regularMarketChangePercent ?? 0;
 
     return Response.json(
       {
         ticker,
         price: displayPrice,
-        change,
-        changePercent,
+        change: displayChange,
+        changePercent: displayChangePct,
         prevClose,
         isExtendedHours: extPrice != null,
       },
