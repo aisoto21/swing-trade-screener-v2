@@ -1,6 +1,5 @@
 "use client";
 
-import { use } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MultiTimeframePanel } from "@/components/charts/MultiTimeframePanel";
 import { SetupBadge } from "@/components/screener/SetupBadge";
@@ -34,12 +33,7 @@ async function fetchOptionsRecommendation(
   return data;
 }
 
-export default function AnalysisPageClient({
-  params,
-}: {
-  params: Promise<{ ticker: string }>;
-}) {
-  const { ticker } = use(params);
+export default function AnalysisPageClient({ ticker }: { ticker: string }) {
   const optionsLayer = useFeature("OPTIONS_LAYER");
   const settings = useSettingsStore();
 
