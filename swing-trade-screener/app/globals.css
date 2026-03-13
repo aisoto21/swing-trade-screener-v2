@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Design tokens - Dark Terminal */
+    --background-base: #0A0B0D;
+    --background-surface: #111318;
+    --background-elevated: #1A1D24;
+    --background-subtle: #1F2330;
+    --border-default: #252836;
+    --border-emphasis: #363A4F;
+    --text-primary: #E8EAF0;
+    --text-secondary: #7C8099;
+    --text-muted: #4A4F66;
+    --signal-long: #00D084;
+    --signal-long-muted: #0D3D2A;
+    --signal-short: #FF4D6A;
+    --signal-short-muted: #3D0D15;
+    --signal-neutral: #6C7AE0;
+    --signal-neutral-muted: #1A1E40;
+    --grade-aplus: #FFD700;
+    --grade-a: #C8A96A;
+    --grade-b: #7C8099;
+    --grade-c: #4A4F66;
+    --volume-institutional: #00D084;
+    --volume-climactic: #FF8C00;
+    --volume-weak: #4A4F66;
+    --regime-bull: #00D084;
+    --regime-bear: #FF4D6A;
+    --regime-choppy: #FFB347;
+    --regime-distribution: #FF4D6A;
+    --regime-accumulation: #00D084;
+
+    /* Legacy shadcn compatibility */
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 142.1 76.2% 36.3%;
+    --primary-foreground: 355.7 100% 97.3%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 142.1 76.2% 36.3%;
+    --radius: 0.5rem;
+    --bullish: 142 76% 36%;
+    --bearish: 0 84% 60%;
+  }
+
+  .light {
+    --background-base: #F8F9FA;
+    --background-surface: #FFFFFF;
+    --background-elevated: #FFFFFF;
+    --background-subtle: #F1F3F5;
+    --border-default: #E9ECEF;
+    --border-emphasis: #DEE2E6;
+    --text-primary: #212529;
+    --text-secondary: #495057;
+    --text-muted: #868E96;
+    --signal-long: #00A86B;
+    --signal-long-muted: #D4EDDA;
+    --signal-short: #DC3545;
+    --signal-short-muted: #F8D7DA;
+    --signal-neutral: #6C7AE0;
+    --signal-neutral-muted: #E8EAF6;
+    --grade-aplus: #D4A017;
+    --grade-a: #B8860B;
+    --grade-b: #7C8099;
+    --grade-c: #4A4F66;
+    --volume-institutional: #00A86B;
+    --volume-climactic: #E67E22;
+    --volume-weak: #868E96;
+    --regime-bull: #00A86B;
+    --regime-bear: #DC3545;
+    --regime-choppy: #F39C12;
+    --regime-distribution: #DC3545;
+    --regime-accumulation: #00A86B;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-[var(--border-default)];
+  }
+  body {
+    background-color: var(--background-base);
+    color: var(--text-primary);
+  }
+}
+
+/* Tabular numbers for data alignment */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pulsing dot for live indicator */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Row entrance animation */
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-row-enter {
+  animation: row-enter 150ms ease-out forwards;
+}
