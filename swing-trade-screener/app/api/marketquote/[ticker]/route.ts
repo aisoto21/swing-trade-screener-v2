@@ -1,12 +1,4 @@
 import { NextRequest } from "next/server";
-import * as yahooFinanceModule from "yahoo-finance2";
-
-// Handle both CJS default export and ESM named exports
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const yf: any =
-  (yahooFinanceModule as any).default?.default ??
-  (yahooFinanceModule as any).default ??
-  yahooFinanceModule;
 
 export async function GET(
   _req: NextRequest,
@@ -15,20 +7,41 @@ export async function GET(
   const { ticker } = await params;
 
   try {
-    const q = await yf.quote(ticker);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+      },
+      next: { revalidate: 60 },
+    });
 
-    const extPrice = q.postMarketPrice ?? q.preMarketPrice ?? null;
-    const extChange = q.postMarketChangePercent ?? q.preMarketChangePercent ?? null;
-    const extAbsChange = q.postMarketChange ?? q.preMarketChange ?? null;
-    const regularPrice = q.regularMarketPrice ?? 0;
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+
+    const data = await res.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) throw new Error("No data returned from Yahoo");
+
+    // Yahoo meta fields:
+    // regularMarketPrice - current/last regular session price
+    // postMarketPrice    - after hours price (if available)
+    // preMarketPrice     - pre-market price (if available)
+    // chartPreviousClose - previous close
+    const regularPrice: number = meta.regularMarketPrice ?? 0;
+    const extPrice: number | null = meta.postMarketPrice ?? meta.preMarketPrice ?? null;
+    const prevClose: number = meta.chartPreviousClose ?? meta.previousClose ?? regularPrice;
+
+    const displayPrice = extPrice ?? regularPrice;
+    const change = displayPrice - prevClose;
+    const changePercent = prevClose ? (change / prevClose) * 100 : 0;
 
     return Response.json(
       {
         ticker,
-        price: extPrice ?? regularPrice,
-        change: extAbsChange ?? q.regularMarketChange ?? 0,
-        changePercent: extChange ?? q.regularMarketChangePercent ?? 0,
-        prevClose: q.regularMarketPreviousClose ?? 0,
+        price: displayPrice,
+        change,
+        changePercent,
+        prevClose,
         isExtendedHours: extPrice != null,
       },
       { headers: { "Cache-Control": "public, max-age=60" } }
