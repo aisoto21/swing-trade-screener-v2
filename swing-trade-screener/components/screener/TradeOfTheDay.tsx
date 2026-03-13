@@ -11,7 +11,7 @@ interface TradeOfTheDayProps {
 }
 
 export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
-  if (!result) return null;
+  if (!result?.primarySetup?.tradeParams) return null;
 
   const { primarySetup } = result;
   const t = primarySetup.tradeParams;
@@ -46,23 +46,23 @@ export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Entry Zone</p>
             <p className="font-mono text-base tabular-nums text-[var(--text-primary)]">
-              {formatCurrency(t.entry.zone[0])} – {formatCurrency(t.entry.zone[1])}
+              {formatCurrency(t.entry?.zone?.[0])} – {formatCurrency(t.entry?.zone?.[1])}
             </p>
           </div>
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Stop Loss</p>
             <p className="font-mono text-base tabular-nums text-[var(--signal-short)]">
-              {formatCurrency(t.stop.price)} ({formatPercent(t.stop.riskPercent)})
+              {formatCurrency(t.stop?.price)} ({formatPercent(t.stop?.riskPercent ?? 0)})
             </p>
           </div>
           <div>
             <p className="text-[11px] text-[var(--text-muted)]">Target 1</p>
             <p className="font-mono text-base tabular-nums text-[var(--signal-long)]">
-              {formatCurrency(t.targets.t1.price)}
+              {formatCurrency(t.targets?.t1?.price)}
             </p>
           </div>
           <p className="font-mono text-lg font-semibold tabular-nums text-[var(--signal-long)]">
-            {t.riskReward.toT1.toFixed(1)}:1
+            {(t.riskReward?.toT1 ?? 0).toFixed(1)}:1
           </p>
         </div>
 
@@ -71,10 +71,10 @@ export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
             View Full Analysis →
           </span>
           <span className="text-xs text-[var(--text-secondary)]">
-            {t.analystRating}
+            {t.analystRating ?? "—"}
           </span>
           <span className="rounded-full bg-[var(--background-subtle)] px-3 py-1 font-mono text-[11px] text-[var(--text-secondary)]">
-            {t.holdDuration}
+            {t.holdDuration ?? "—"}
           </span>
         </div>
       </div>
