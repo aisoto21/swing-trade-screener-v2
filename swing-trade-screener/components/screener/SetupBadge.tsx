@@ -33,10 +33,10 @@ export const SetupBadge = memo(function SetupBadge({ setup, className }: SetupBa
           {setup.bias} • {setup.timeframe} • Grade: {setup.grade}
         </p>
         <ul className="mt-2 space-y-1 text-xs">
-          {setup.confirmingFactors.map((f, i) => (
+          {(setup.confirmingFactors ?? []).map((f, i) => (
             <li key={i} className="text-[var(--signal-long)]">✓ {f}</li>
           ))}
-          {setup.riskFactors.map((f, i) => (
+          {(setup.riskFactors ?? []).map((f, i) => (
             <li key={i} className="text-[var(--signal-short)]">⚠ {f}</li>
           ))}
         </ul>
