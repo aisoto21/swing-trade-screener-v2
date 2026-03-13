@@ -9,7 +9,7 @@ import { ScoringMethodologyModal } from "@/components/screener/ScoringMethodolog
 import { useFeature } from "@/lib/hooks/useFeature";
 import type { ScreenerResult, ScreenerFilters, ContractRecommendation } from "@/types";
 import { SCREENING_UNIVERSE } from "@/constants/universe";
-import { useRegimeStore } from "@/lib/stores/regimeStore";
+import { useRegimeStore } from "@/lib/stores/regimeStore"
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 const DEFAULT_FILTERS: ScreenerFilters = {
@@ -44,6 +44,7 @@ export default function ScreenerPage() {
   const [filters, setFilters] = useState<ScreenerFilters>(DEFAULT_FILTERS);
   const [results, setResults] = useState<ScreenerResult[]>([]);
   const { setRegime, setLastUpdated } = useRegimeStore();
+  const settings = useSettingsStore();
   const [isLoading, setIsLoading] = useState(false);
   const [lastScan, setLastScan] = useState<Date | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: SCREENING_UNIVERSE.length });
