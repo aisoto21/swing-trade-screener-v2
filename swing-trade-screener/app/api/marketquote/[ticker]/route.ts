@@ -1,5 +1,12 @@
 import { NextRequest } from "next/server";
-import yahooFinance from "yahoo-finance2";
+import * as yahooFinanceModule from "yahoo-finance2";
+
+// Handle both CJS default export and ESM named exports
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const yf: any =
+  (yahooFinanceModule as any).default?.default ??
+  (yahooFinanceModule as any).default ??
+  yahooFinanceModule;
 
 export async function GET(
   _req: NextRequest,
@@ -8,7 +15,7 @@ export async function GET(
   const { ticker } = await params;
 
   try {
-    const q = await yahooFinance.quote(ticker);
+    const q = await yf.quote(ticker);
 
     const extPrice = q.postMarketPrice ?? q.preMarketPrice ?? null;
     const extChange = q.postMarketChangePercent ?? q.preMarketChangePercent ?? null;
