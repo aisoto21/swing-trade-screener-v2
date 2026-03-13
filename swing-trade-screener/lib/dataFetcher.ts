@@ -2,7 +2,14 @@ import type { OHLCVBar } from "@/types";
 import type { Timeframe } from "@/types";
 import { DAILY_BARS, FOUR_HOUR_BARS, FIFTEEN_MIN_BARS } from "@/constants/indicators";
 import { generateMockOHLCV } from "@/lib/utils/mockData";
-import yahooFinance from "yahoo-finance2";
+import * as yahooFinanceModule from "yahoo-finance2";
+
+// Handle both CJS default export and ESM named exports
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const yahooFinance: any =
+  (yahooFinanceModule as any).default?.default ??
+  (yahooFinanceModule as any).default ??
+  yahooFinanceModule;
 
 export async function fetchOHLCV(
   ticker: string,
@@ -53,13 +60,10 @@ async function fetchYahooFinance(
 
     let bars: OHLCVBar[] = result.quotes
       .filter(
-        (q) =>
-          q.open != null &&
-          q.high != null &&
-          q.low != null &&
-          q.close != null
+        (q: any) =>
+          q.open != null && q.high != null && q.low != null && q.close != null
       )
-      .map((q) => ({
+      .map((q: any) => ({
         date: new Date(q.date).toISOString(),
         open: q.open as number,
         high: q.high as number,
