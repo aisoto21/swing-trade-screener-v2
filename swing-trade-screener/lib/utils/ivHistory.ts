@@ -101,10 +101,5 @@ async function getKV(): Promise<{ get: (key: string) => Promise<unknown>; set: (
     };
   }
 
-  try {
-    const mod = await import("@vercel/kv");
-    return mod.kv ?? null;
-  } catch {
-    return null;
-  }
+  return null;
 }
