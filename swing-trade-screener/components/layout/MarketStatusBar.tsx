@@ -22,7 +22,7 @@ export function MarketStatusBar() {
         const [spyRes, qqqRes, vixRes] = await Promise.all([
           fetch("/api/marketquote/SPY"),
           fetch("/api/marketquote/QQQ"),
-          fetch("/api/marketquote/VIX"),
+          fetch("/api/marketquote/%5EVIX"),
         ]);
         const [spy, qqq, vix] = await Promise.all([
           spyRes.json(),
