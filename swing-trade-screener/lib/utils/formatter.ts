@@ -2,18 +2,22 @@
  * Format monetary values and percentages
  */
 export function formatCurrency(value: number, locale: string = "en-US"): string {
-  const decimals = value < 1 ? 4 : 2;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  const decimals = n < 1 ? 4 : 2;
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(value);
+  }).format(n);
 }
 
 export function formatPercent(value: number, withSign: boolean = false): string {
-  const formatted = value.toFixed(2) + "%";
-  if (withSign && value > 0) return "+" + formatted;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  const formatted = n.toFixed(2) + "%";
+  if (withSign && n > 0) return "+" + formatted;
   return formatted;
 }
 
