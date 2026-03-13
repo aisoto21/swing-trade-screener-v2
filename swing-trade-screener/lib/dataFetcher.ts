@@ -3,81 +3,81 @@ import type { Timeframe } from "@/types";
 import { DAILY_BARS, FOUR_HOUR_BARS, FIFTEEN_MIN_BARS } from "@/constants/indicators";
 import { generateMockOHLCV } from "@/lib/utils/mockData";
 
+const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY ?? "";
+const FINNHUB_BASE = "https://finnhub.io/api/v1";
+
+function toFinnhubResolution(timeframe: Timeframe): string {
+  if (timeframe === "1D") return "D";
+  if (timeframe === "4H") return "60"; // fetch 1H, aggregate to 4H
+  return "15"; // 15M
+}
+
 /**
- * Fetch OHLCV data from Yahoo Finance (yahoo-finance2)
- * Falls back to mock data when API fails or for intraday when unavailable
+ * Fetch OHLCV data from Finnhub.
+ * Falls back to mock data only when API key is missing or call fails.
  */
 export async function fetchOHLCV(
   ticker: string,
   timeframe: Timeframe,
   useMock: boolean = false
 ): Promise<OHLCVBar[]> {
-  if (useMock) {
-    const bars = timeframe === "1D" ? DAILY_BARS : timeframe === "4H" ? FOUR_HOUR_BARS : FIFTEEN_MIN_BARS;
-    return generateMockOHLCV(ticker, timeframe, bars);
-  }
+  const barsNeeded =
+    timeframe === "1D"
+      ? DAILY_BARS
+      : timeframe === "4H"
+      ? FOUR_HOUR_BARS
+      : FIFTEEN_MIN_BARS;
 
-  const barsNeeded = timeframe === "1D" ? DAILY_BARS : timeframe === "4H" ? FOUR_HOUR_BARS : FIFTEEN_MIN_BARS;
+  if (useMock || !FINNHUB_API_KEY) {
+    return generateMockOHLCV(ticker, timeframe, barsNeeded);
+  }
 
   try {
-    const yahooFinance = await import("yahoo-finance2").then((m) => m.default);
-    const period1 = new Date();
-    period1.setFullYear(period1.getFullYear() - 1);
+    const resolution = toFinnhubResolution(timeframe);
+    const toTs = Math.floor(Date.now() / 1000);
+    const lookbackDays =
+      timeframe === "1D" ? 400 : timeframe === "4H" ? 120 : 30;
+    const fromTs = toTs - lookbackDays * 24 * 60 * 60;
 
-    if (timeframe === "1D") {
-      const result = await yahooFinance.historical(ticker, {
-        period1: period1.toISOString().slice(0, 10),
-        period2: new Date().toISOString().slice(0, 10),
-      });
-      if (!result || result.length === 0) throw new Error("No data");
-      const mapped: OHLCVBar[] = result.slice(-barsNeeded).map((d: { date: Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-        date: new Date(d.date).toISOString(),
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        volume: d.volume ?? 0,
-      }));
-      return mapped;
+    const url = `${FINNHUB_BASE}/stock/candle?symbol=${ticker}&resolution=${resolution}&from=${fromTs}&to=${toTs}&token=${FINNHUB_API_KEY}`;
+    const res = await fetch(url);
+
+    if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    if (data.s !== "ok" || !data.t || data.t.length === 0) {
+      throw new Error(`Finnhub no data: ${data.s}`);
     }
 
-    const interval = timeframe === "4H" ? "1h" : "15m";
-    const chart = await (yahooFinance as { chart?: (symbol: string, opts: { interval: string; period1: string; period2: string }) => Promise<{ quotes?: Array<{ date: number; open: number; high: number; low: number; close: number; volume?: number }> }> }).chart?.(
-      ticker,
-      {
-        interval,
-        period1: period1.toISOString().slice(0, 10),
-        period2: new Date().toISOString().slice(0, 10),
-      }
+    let mapped: OHLCVBar[] = data.t.map((ts: number, i: number) => ({
+      date: new Date(ts * 1000).toISOString(),
+      open: data.o[i],
+      high: data.h[i],
+      low: data.l[i],
+      close: data.c[i],
+      volume: data.v[i] ?? 0,
+    }));
+
+    if (timeframe === "4H") {
+      mapped = aggregateTo4H(mapped);
+    }
+
+    return mapped.slice(-barsNeeded);
+  } catch (err) {
+    console.error(
+      `[dataFetcher] Finnhub failed for ${ticker} (${timeframe}):`,
+      err
     );
-
-    if (chart?.quotes && chart.quotes.length > 0) {
-      let mapped: OHLCVBar[] = chart.quotes.map((q) => ({
-        date: new Date(q.date * 1000).toISOString(),
-        open: q.open,
-        high: q.high,
-        low: q.low,
-        close: q.close,
-        volume: q.volume ?? 0,
-      }));
-
-      if (timeframe === "4H" && interval === "1h") {
-        mapped = aggregateTo4H(mapped);
-      }
-      return mapped.slice(-barsNeeded);
-    }
-  } catch {
-    // Fall through to mock
+    return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
-
-  return generateMockOHLCV(ticker, timeframe, barsNeeded);
 }
 
 function aggregateTo4H(bars: OHLCVBar[]): OHLCVBar[] {
   const result: OHLCVBar[] = [];
   for (let i = 0; i < bars.length; i += 4) {
     const chunk = bars.slice(i, i + 4);
-    if (chunk.length === 0) break;
+    if (!chunk.length) break;
     result.push({
       date: chunk[0].date,
       open: chunk[0].open,
