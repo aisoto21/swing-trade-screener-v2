@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { MultiTimeframePanel } from "@/components/charts/MultiTimeframePanel";
 import { SetupBadge } from "@/components/screener/SetupBadge";
@@ -38,20 +39,24 @@ async function fetchOptionsRecommendation(
 }
 
 export default function AnalysisPageClient({ ticker }: { ticker: string }) {
+  const searchParams = useSearchParams();
+  const accountSize = parseFloat(searchParams.get("accountSize") ?? "25000");
+  const riskPerTrade = parseFloat(searchParams.get("riskPerTrade") ?? "0.01");
+
   const optionsLayer = useFeature("OPTIONS_LAYER");
   const settings = useSettingsStore();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["analysis", ticker, settings.accountSize, settings.riskPerTrade],
-    queryFn: () => fetchAnalysis(ticker, settings.accountSize ?? 25000, settings.riskPerTrade ?? 0.01),
+    queryKey: ["analysis", ticker, accountSize, riskPerTrade],
+    queryFn: () => fetchAnalysis(ticker, accountSize, riskPerTrade),
   });
 
   const { data: optionsRec } = useQuery({
     queryKey: ["options", ticker, data?.primarySetup],
     queryFn: () =>
       fetchOptionsRecommendation(ticker, data?.primarySetup, {
-        accountSize: settings.accountSize,
-        riskPerTrade: settings.riskPerTrade,
+        accountSize,
+        riskPerTrade,
         optionsMinIVP: settings.optionsMinIVP,
         optionsMinOI: settings.optionsMinOI,
         optionsDTEMultiplier: settings.optionsDTEMultiplier,
@@ -136,12 +141,7 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
                   <p className="font-mono text-xl tabular-nums text-[var(--text-primary)]">
                     {formatCurrency(data.price)}
                   </p>
-                  <p
-                    className={cn(
-                      "font-mono text-sm tabular-nums",
-                      data.priceChangePercent >= 0 ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]"
-                    )}
-                  >
+                  <p className={cn("font-mono text-sm tabular-nums", data.priceChangePercent >= 0 ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]")}>
                     {formatPercent(data.priceChangePercent, true)}
                   </p>
                 </div>
@@ -150,14 +150,7 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
                 <SetupBadge setup={primarySetup} />
                 <GradeBadge grade={primarySetup.grade} />
               </div>
-              <div
-                className={cn(
-                  "mt-2 inline-block rounded px-4 py-2 font-mono text-sm font-semibold",
-                  isLong
-                    ? "bg-[var(--signal-long-muted)] text-[var(--signal-long)]"
-                    : "bg-[var(--signal-short-muted)] text-[var(--signal-short)]"
-                )}
-              >
+              <div className={cn("mt-2 inline-block rounded px-4 py-2 font-mono text-sm font-semibold", isLong ? "bg-[var(--signal-long-muted)] text-[var(--signal-long)]" : "bg-[var(--signal-short-muted)] text-[var(--signal-short)]")}>
                 {t.analystRating.replace(" ", " ").toUpperCase()}
               </div>
             </div>
@@ -195,28 +188,16 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between">
-                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">
-                    T1: {formatCurrency(t.targets.t1.price)} ({formatPercent(t.targets.t1.percentGain, true)})
-                  </span>
-                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                    R:R {t.riskReward.toT1.toFixed(1)}:1 — Take 50%
-                  </span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">T1: {formatCurrency(t.targets.t1.price)} ({formatPercent(t.targets.t1.percentGain, true)})</span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">R:R {t.riskReward.toT1.toFixed(1)}:1 — Take 50%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">
-                    T2: {formatCurrency(t.targets.t2.price)} ({formatPercent(t.targets.t2.percentGain, true)})
-                  </span>
-                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                    R:R {t.riskReward.toT2.toFixed(1)}:1 — Take 30%
-                  </span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">T2: {formatCurrency(t.targets.t2.price)} ({formatPercent(t.targets.t2.percentGain, true)})</span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">R:R {t.riskReward.toT2.toFixed(1)}:1 — Take 30%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">
-                    T3: {formatCurrency(t.targets.t3.price)} ({formatPercent(t.targets.t3.percentGain, true)})
-                  </span>
-                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                    R:R {t.riskReward.toT3.toFixed(1)}:1 — Let 20% run
-                  </span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--signal-long)]">T3: {formatCurrency(t.targets.t3.price)} ({formatPercent(t.targets.t3.percentGain, true)})</span>
+                  <span className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">R:R {t.riskReward.toT3.toFixed(1)}:1 — Let 20% run</span>
                 </div>
               </div>
             </div>
@@ -228,7 +209,7 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
                 <p>Max exposure: {formatCurrency(t.positionSizing.maxDollarExposure)}</p>
                 <p>Portfolio %: {(t.positionSizing.portfolioPercent * 100).toFixed(1)}%</p>
                 <p className="text-[var(--text-muted)]">
-                  Risk amount: {formatCurrency((settings.accountSize ?? 25000) * (settings.riskPerTrade ?? 0.01))} ({((settings.riskPerTrade ?? 0.01) * 100).toFixed(1)}% of {formatCurrency(settings.accountSize ?? 25000)})
+                  Risk amount: {formatCurrency(accountSize * riskPerTrade)} ({(riskPerTrade * 100).toFixed(1)}% of {formatCurrency(accountSize)})
                 </p>
                 {t.positionSizing.concentrationWarning && (
                   <p className="text-[var(--regime-choppy)]">⚠ Concentration risk</p>
@@ -236,17 +217,13 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
               </div>
             </div>
 
-            <p className="font-mono text-xs text-[var(--text-secondary)]">
-              Hold Duration: {t.holdDuration}
-            </p>
+            <p className="font-mono text-xs text-[var(--text-secondary)]">Hold Duration: {t.holdDuration}</p>
 
             <div className="rounded-lg border border-[var(--border-default)] bg-[var(--background-surface)] p-4">
               <h3 className="mb-2 font-mono text-xs font-semibold text-[var(--text-secondary)]">CONFIRMING FACTORS</h3>
               <ul className="space-y-1">
                 {primarySetup.confirmingFactors.map((f: string, i: number) => (
-                  <li key={i} className="flex items-center gap-2 font-sans text-xs text-[var(--signal-long)]">
-                    <span>●</span> {f}
-                  </li>
+                  <li key={i} className="flex items-center gap-2 font-sans text-xs text-[var(--signal-long)]"><span>●</span> {f}</li>
                 ))}
               </ul>
             </div>
@@ -258,9 +235,7 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
                   <li className="font-sans text-xs text-[var(--text-muted)]">None identified</li>
                 ) : (
                   primarySetup.riskFactors.map((f: string, i: number) => (
-                    <li key={i} className="flex items-center gap-2 font-sans text-xs text-[var(--signal-short)]">
-                      <span>⚠</span> {f}
-                    </li>
+                    <li key={i} className="flex items-center gap-2 font-sans text-xs text-[var(--signal-short)]"><span>⚠</span> {f}</li>
                   ))
                 )}
               </ul>
