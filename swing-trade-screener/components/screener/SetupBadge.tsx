@@ -27,7 +27,10 @@ export const SetupBadge = memo(function SetupBadge({ setup, className }: SetupBa
         {isAplus && <span className="mr-1 text-[var(--grade-aplus)]">●</span>}
         {setup.name}
       </span>
-      <div className="absolute left-0 top-full z-50 mt-1 hidden w-72 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
+      {/* Tooltip — fixed position via JS would be ideal but CSS approach:
+          Use bottom-full to pop UP instead of down, avoiding table overlap.
+          z-[200] ensures it renders above sticky headers and filter bars. */}
+      <div className="absolute bottom-full left-0 z-[200] mb-1 hidden w-72 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
         <p className="font-medium text-[var(--text-primary)]">{setup.name}</p>
         <p className="mt-1 text-xs text-[var(--text-secondary)]">
           {setup.bias} • {setup.timeframe} • Grade: {setup.grade}
