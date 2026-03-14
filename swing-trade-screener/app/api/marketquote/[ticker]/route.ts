@@ -7,6 +7,8 @@ export async function GET(
   const { ticker } = await params;
 
   try {
+    // 1m interval with includePrePost=true captures the most recent
+    // price including pre/after-hours trading
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1m&range=1d&includePrePost=true`;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
@@ -16,50 +18,33 @@ export async function GET(
     if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
 
     const data = await res.json();
-    const meta = data?.chart?.result?.[0]?.meta;
-    if (!meta) throw new Error("No meta data returned");
+    const result = data?.chart?.result?.[0];
+    if (!result) throw new Error("No data returned");
 
-    // Use currentTradingPeriod to detect extended hours
-    const tradingPeriods = data?.chart?.result?.[0]?.meta?.currentTradingPeriod;
-    const now = Math.floor(Date.now() / 1000);
-    const postStart = tradingPeriods?.post?.start ?? 0;
-    const postEnd = tradingPeriods?.post?.end ?? 0;
-    const preStart = tradingPeriods?.pre?.start ?? 0;
-    const preEnd = tradingPeriods?.pre?.end ?? 0;
+    const meta = result.meta;
+    const prevClose: number = meta?.chartPreviousClose ?? meta?.regularMarketPrice ?? 0;
 
-    const isPostMarket = now >= postStart && now <= postEnd;
-    const isPreMarket = now >= preStart && now <= preEnd;
-    const isExtendedHours = isPostMarket || isPreMarket;
+    // Most recent price from 1m candles (includes pre/post market)
+    const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+    const currentPrice = [...closes].reverse().find((p) => p != null) ?? meta?.regularMarketPrice ?? 0;
 
-    const regularPrice: number = meta.regularMarketPrice ?? meta.chartPreviousClose ?? 0;
-    const extPrice: number | null =
-      meta.postMarketPrice ?? meta.preMarketPrice ?? null;
-
-    // Fall back to last quote in the 1m data as the most current price
-    const quotes = data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    const lastQuote = [...quotes].reverse().find((p: number | null) => p != null) ?? null;
-
-    const displayPrice = isExtendedHours && extPrice ? extPrice : (lastQuote ?? regularPrice);
-    const prevClose: number = meta.chartPreviousClose ?? meta.regularMarketPrice ?? 0;
-    const change = displayPrice - prevClose;
+    const change = currentPrice - prevClose;
     const changePercent = prevClose ? (change / prevClose) * 100 : 0;
+
+    // Detect extended hours by comparing to regular market close time
+    const regularClose = result.meta?.currentTradingPeriod?.regular?.end ?? 0;
+    const timestamps: number[] = result.timestamp ?? [];
+    const lastTimestamp = timestamps[timestamps.length - 1] ?? 0;
+    const isExtendedHours = lastTimestamp > regularClose;
 
     return Response.json(
       {
         ticker,
-        price: displayPrice,
-        change,
-        changePercent,
+        price: Number(currentPrice.toFixed(2)),
+        change: Number(change.toFixed(2)),
+        changePercent: Number(changePercent.toFixed(4)),
         prevClose,
         isExtendedHours,
-        // debug fields - remove later
-        _meta_postMarketPrice: meta.postMarketPrice,
-        _meta_preMarketPrice: meta.preMarketPrice,
-        _meta_regularMarketPrice: meta.regularMarketPrice,
-        _lastQuote: lastQuote,
-        _isPostMarket: isPostMarket,
-        _isPreMarket: isPreMarket,
-        _postWindow: `${new Date(postStart * 1000).toLocaleTimeString()} - ${new Date(postEnd * 1000).toLocaleTimeString()}`,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
