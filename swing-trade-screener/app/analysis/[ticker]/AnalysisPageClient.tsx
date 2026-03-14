@@ -12,8 +12,12 @@ import { formatCurrency, formatPercent } from "@/lib/utils/formatter";
 import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 
-async function fetchAnalysis(ticker: string) {
-  const res = await fetch(`/api/quote/${ticker}`);
+async function fetchAnalysis(ticker: string, accountSize: number, riskPerTrade: number) {
+  const params = new URLSearchParams({
+    accountSize: accountSize.toString(),
+    riskPerTrade: riskPerTrade.toString(),
+  });
+  const res = await fetch(`/api/quote/${ticker}?${params}`);
   if (!res.ok) throw new Error("Failed to fetch");
   return res.json();
 }
@@ -38,8 +42,8 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
   const settings = useSettingsStore();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["analysis", ticker],
-    queryFn: () => fetchAnalysis(ticker),
+    queryKey: ["analysis", ticker, settings.accountSize, settings.riskPerTrade],
+    queryFn: () => fetchAnalysis(ticker, settings.accountSize ?? 25000, settings.riskPerTrade ?? 0.01),
   });
 
   const { data: optionsRec } = useQuery({
@@ -224,7 +228,7 @@ export default function AnalysisPageClient({ ticker }: { ticker: string }) {
                 <p>Max exposure: {formatCurrency(t.positionSizing.maxDollarExposure)}</p>
                 <p>Portfolio %: {(t.positionSizing.portfolioPercent * 100).toFixed(1)}%</p>
                 <p className="text-[var(--text-muted)]">
-                  Risk amount: {formatCurrency(25000 * 0.01)} (1% of $25,000)
+                  Risk amount: {formatCurrency((settings.accountSize ?? 25000) * (settings.riskPerTrade ?? 0.01))} ({((settings.riskPerTrade ?? 0.01) * 100).toFixed(1)}% of {formatCurrency(settings.accountSize ?? 25000)})
                 </p>
                 {t.positionSizing.concentrationWarning && (
                   <p className="text-[var(--regime-choppy)]">⚠ Concentration risk</p>
