@@ -2,14 +2,8 @@ import type { OHLCVBar } from "@/types";
 import type { Timeframe } from "@/types";
 import { DAILY_BARS, FOUR_HOUR_BARS, FIFTEEN_MIN_BARS } from "@/constants/indicators";
 import { generateMockOHLCV } from "@/lib/utils/mockData";
-import * as yahooFinanceModule from "yahoo-finance2";
 
-// Handle both CJS default export and ESM named exports
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const yahooFinance: any =
-  (yahooFinanceModule as any).default?.default ??
-  (yahooFinanceModule as any).default ??
-  yahooFinanceModule;
+const YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 export async function fetchOHLCV(
   ticker: string,
@@ -17,68 +11,61 @@ export async function fetchOHLCV(
   useMock: boolean = false
 ): Promise<OHLCVBar[]> {
   const barsNeeded =
-    timeframe === "1D"
-      ? DAILY_BARS
-      : timeframe === "4H"
-      ? FOUR_HOUR_BARS
-      : FIFTEEN_MIN_BARS;
+    timeframe === "1D" ? DAILY_BARS : timeframe === "4H" ? FOUR_HOUR_BARS : FIFTEEN_MIN_BARS;
 
-  if (useMock) {
-    return generateMockOHLCV(ticker, timeframe, barsNeeded);
-  }
+  if (useMock) return generateMockOHLCV(ticker, timeframe, barsNeeded);
 
-  return fetchYahooFinance(ticker, timeframe, barsNeeded);
+  return fetchYahoo(ticker, timeframe, barsNeeded);
 }
 
-async function fetchYahooFinance(
+async function fetchYahoo(
   ticker: string,
   timeframe: Timeframe,
   barsNeeded: number
 ): Promise<OHLCVBar[]> {
   try {
-    const interval =
-      timeframe === "1D" ? "1d" : timeframe === "4H" ? "1h" : "15m";
+    const interval = timeframe === "1D" ? "1d" : timeframe === "4H" ? "1h" : "15m";
 
+    // How many days of history to request
     const lookbackDays =
-      timeframe === "1D"
-        ? barsNeeded + 50
-        : timeframe === "4H"
-        ? Math.ceil((barsNeeded * 4) / 6.5) + 10
-        : Math.ceil((barsNeeded * 0.25) / 6.5) + 5;
+      timeframe === "1D" ? barsNeeded + 60
+      : timeframe === "4H" ? Math.ceil((barsNeeded * 4) / 6.5) + 15
+      : Math.ceil((barsNeeded * 0.25) / 6.5) + 5;
 
-    const period1 = new Date();
-    period1.setDate(period1.getDate() - lookbackDays);
+    const range = `${lookbackDays}d`;
 
-    const result = await yahooFinance.chart(ticker, {
-      period1,
-      interval: interval as "1d" | "1h" | "15m",
+    const url = `${YAHOO_BASE}/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
+      next: { revalidate: 300 },
     });
 
-    if (!result?.quotes || result.quotes.length === 0) {
-      throw new Error(`Yahoo Finance returned no data for ${ticker}`);
-    }
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
 
-    let bars: OHLCVBar[] = result.quotes
-      .filter(
-        (q: any) =>
-          q.open != null && q.high != null && q.low != null && q.close != null
-      )
-      .map((q: any) => ({
-        date: new Date(q.date).toISOString(),
-        open: q.open as number,
-        high: q.high as number,
-        low: q.low as number,
-        close: q.close as number,
-        volume: q.volume ?? 0,
-      }));
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    if (!result) throw new Error("No chart data returned");
 
-    if (timeframe === "4H") {
-      bars = aggregateTo4H(bars);
-    }
+    const timestamps: number[] = result.timestamp ?? [];
+    const ohlcv = result.indicators?.quote?.[0];
+    if (!ohlcv || timestamps.length === 0) throw new Error("No OHLCV data in response");
+
+    let bars: OHLCVBar[] = timestamps
+      .map((ts: number, i: number) => ({
+        date: new Date(ts * 1000).toISOString(),
+        open: ohlcv.open?.[i] ?? 0,
+        high: ohlcv.high?.[i] ?? 0,
+        low: ohlcv.low?.[i] ?? 0,
+        close: ohlcv.close?.[i] ?? 0,
+        volume: ohlcv.volume?.[i] ?? 0,
+      }))
+      .filter((b) => b.open && b.close);
+
+    if (timeframe === "4H") bars = aggregateTo4H(bars);
 
     return bars.slice(-barsNeeded);
   } catch (err) {
-    console.error(`[dataFetcher] Yahoo Finance failed for ${ticker} (${timeframe}):`, err);
+    console.error(`[dataFetcher] Yahoo failed for ${ticker} (${timeframe}):`, err);
     return generateMockOHLCV(ticker, timeframe, barsNeeded);
   }
 }
