@@ -232,7 +232,7 @@ export default function ScreenerPage() {
           </button>
         </div>
 
-        <TradeOfTheDay result={tradeOfTheDay} />
+        <TradeOfTheDay result={tradeOfTheDay} accountSize={filters.accountSize} riskPerTrade={filters.riskPerTrade} />
 
         {isLoading && (
           <ScanProgress
@@ -264,6 +264,8 @@ export default function ScreenerPage() {
           isLoading={isLoading}
           optionsMode={optionsMode}
           optionsRecommendations={optionsRecommendations}
+          accountSize={filters.accountSize}
+          riskPerTrade={filters.riskPerTrade}
         />
       </div>
 
