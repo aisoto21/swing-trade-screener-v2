@@ -181,7 +181,9 @@ export async function getMarketRegime(useMock: boolean = false): Promise<MarketR
  */
 export async function analyzeTicker(
   ticker: string,
-  useMock: boolean = false
+  useMock: boolean = false,
+  accountSize: number = 25000,
+  riskPerTrade: number = 0.01
 ): Promise<DeepAnalysisResult | null> {
   const [daily, fourHour, fifteenMin] = await Promise.all([
     fetchOHLCV(ticker, "1D", useMock),
@@ -235,8 +237,8 @@ export async function analyzeTicker(
     ema9_4H,
     ema9_15M,
     sma50_4H,
-    accountSize: 25000,
-    riskPerTrade: 0.01,
+    accountSize,
+    riskPerTrade,
   });
 
   const primary = setups[0];
