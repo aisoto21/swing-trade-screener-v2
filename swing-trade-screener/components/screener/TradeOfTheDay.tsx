@@ -8,9 +8,11 @@ import { formatCurrency, formatPercent } from "@/lib/utils/formatter";
 
 interface TradeOfTheDayProps {
   result: ScreenerResult | null;
+  accountSize?: number;
+  riskPerTrade?: number;
 }
 
-export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
+export function TradeOfTheDay({ result, accountSize = 25000, riskPerTrade = 0.01 }: TradeOfTheDayProps) {
   if (!result?.primarySetup?.tradeParams) return null;
 
   const { primarySetup } = result;
@@ -18,7 +20,7 @@ export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
   const isLong = primarySetup.bias === "LONG";
 
   return (
-    <Link href={`/analysis/${result.ticker}`}>
+    <Link href={`/analysis/${result.ticker}?accountSize=${accountSize}&riskPerTrade=${riskPerTrade}`}>
       <div
         className={`group flex h-[140px] w-full items-center rounded-lg border border-[var(--border-default)] transition-all duration-100 hover:-translate-y-px hover:border-[var(--border-emphasis)]`}
         style={{
