@@ -19,6 +19,8 @@ const STRUCTURE_LABELS: Record<string, string> = {
 };
 
 interface ResultsTableProps {
+  accountSize?: number;
+  riskPerTrade?: number;
   results: ScreenerResult[];
   onExportCSV?: () => void;
   scanProgress?: { current: number; total: number };
@@ -36,6 +38,8 @@ export function ResultsTable({
   isLoading,
   optionsMode = "Stocks",
   optionsRecommendations = {},
+  accountSize = 25000,
+  riskPerTrade = 0.01,
 }: ResultsTableProps) {
   const optionsLayer = useFeature("OPTIONS_LAYER");
   const showOptionsCols =
@@ -230,7 +234,7 @@ export function ResultsTable({
                 >
                   <td className="w-[120px] px-3 py-2" style={{ height: 52 }}>
                     <Link
-                      href={`/analysis/${r.ticker}`}
+                      href={`/analysis/${r.ticker}?accountSize=${accountSize}&riskPerTrade=${riskPerTrade}`}
                       onClick={() => handleRowClick(r.ticker)}
                       className="block"
                     >
