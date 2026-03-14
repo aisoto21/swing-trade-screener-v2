@@ -11,8 +11,12 @@ export async function GET(
       return Response.json({ error: "Ticker required" }, { status: 400 });
     }
 
+    const url = new URL(req.url);
+    const accountSize = parseFloat(url.searchParams.get("accountSize") ?? "25000");
+    const riskPerTrade = parseFloat(url.searchParams.get("riskPerTrade") ?? "0.01");
+
     const useMock = process.env.USE_MOCK_DATA === "true";
-    const result = await analyzeTicker(ticker.toUpperCase(), useMock);
+    const result = await analyzeTicker(ticker.toUpperCase(), useMock, accountSize, riskPerTrade);
 
     if (!result) {
       return Response.json({ error: "Ticker not found or insufficient data" }, { status: 404 });
