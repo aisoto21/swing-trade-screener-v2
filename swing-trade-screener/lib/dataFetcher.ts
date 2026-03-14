@@ -24,15 +24,12 @@ async function fetchYahoo(
   barsNeeded: number
 ): Promise<OHLCVBar[]> {
   try {
+    // Yahoo only supports preset range values — use fixed ranges per timeframe
+    // 1D needs 200 bars → use "1y" (252 trading days)
+    // 4H needs 100 bars of 1H → use "60d"
+    // 15M needs 96 bars → use "5d"
     const interval = timeframe === "1D" ? "1d" : timeframe === "4H" ? "1h" : "15m";
-
-    // How many days of history to request
-    const lookbackDays =
-      timeframe === "1D" ? barsNeeded + 60
-      : timeframe === "4H" ? Math.ceil((barsNeeded * 4) / 6.5) + 15
-      : Math.ceil((barsNeeded * 0.25) / 6.5) + 5;
-
-    const range = `${lookbackDays}d`;
+    const range = timeframe === "1D" ? "1y" : timeframe === "4H" ? "60d" : "5d";
 
     const url = `${YAHOO_BASE}/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`;
     const res = await fetch(url, {
