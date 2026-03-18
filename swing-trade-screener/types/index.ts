@@ -13,6 +13,9 @@ export interface OHLCVBar {
 
 export type Timeframe = "1D" | "4H" | "15M";
 
+// Separate type for setup timeframe labels (avoids silent mismatch bug)
+export type SetupTimeframe = "Daily" | "4H" | "15M";
+
 // =============================================================================
 // INDICATOR TYPES
 // =============================================================================
@@ -51,6 +54,9 @@ export interface BollingerBandsData {
 export interface VWAPData {
   values: number[];
   priceAbove: boolean;
+  /** Present on anchored VWAP only */
+  anchorIndex?: number;
+  anchorDate?: string;
 }
 
 export interface SupportResistanceLevel {
@@ -76,12 +82,64 @@ export interface CandlestickPattern {
   barIndex: number;
 }
 
+/**
+ * Enhanced VolumeAnalysis with directional context signals.
+ * The same volume reading means completely different things
+ * depending on price location and candle close direction.
+ */
 export interface VolumeAnalysis {
   avgVolume20: number;
   currentVsAvg: number;
   classification: "Institutional Confirmation" | "Climactic / Exhaustion Risk" | "Weak / No Confirmation";
   volumeTrend: "expanding" | "contracting" | "neutral";
   obvSlope: "up" | "down" | "neutral";
+
+  // ── New directional context fields ──────────────────────────────────────
+  /** High volume + bullish close + price breaking above recent resistance */
+  volumeOnBreakout: boolean;
+  /** Climactic volume + close reversal (exhaustion signal) */
+  volumeOnReversal: boolean;
+  /** High volume + bearish close near resistance (smart money distribution) */
+  distributionSignal: boolean;
+  /** High volume + bullish close near support (institutional accumulation) */
+  accumulationSignal: boolean;
+}
+
+/**
+ * ATR analysis for stop validation and volatility context.
+ */
+export interface ATRData {
+  values: number[];
+  current: number;
+  atrPercent: number; // ATR as % of price
+  stopValidation?: {
+    valid: boolean;
+    atrMultiple: number;
+    reason?: string;
+  };
+}
+
+/**
+ * Relative Strength vs. benchmark (SPY).
+ * This is the single most important filter for long setups.
+ */
+export interface RSAnalysis {
+  rs63: number;   // 1-quarter RS (core signal)
+  rs252: number;  // 1-year RS (trend context)
+  rating: number; // 0–100 approximation of IBD RS Rating
+  trending: boolean;   // Short-term RS accelerating vs long-term
+  rsNewHigh: boolean;  // RS line at 52-week high (leading signal)
+  classification: "Leader" | "Outperformer" | "Neutral" | "Laggard" | "Avoid";
+}
+
+/**
+ * Earnings risk context.
+ */
+export interface EarningsData {
+  daysToEarnings: number;
+  nextEarningsDate?: string;
+  riskLevel: "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
+  insideEarningsWindow: boolean; // within 14 days
 }
 
 // =============================================================================
@@ -114,7 +172,7 @@ export type AnalystRating =
 export interface SetupResult {
   name: string;
   bias: Bias;
-  timeframe: Timeframe;
+  timeframe: SetupTimeframe; // Fixed: was Timeframe (mismatch with "Daily" strings)
   grade: SetupGrade;
   confirmingFactors: string[];
   riskFactors: string[];
@@ -135,6 +193,7 @@ export interface TradeParameters {
     price: number;
     type: StopType;
     riskPercent: number;
+    atrMultiple?: number; // How many ATRs from entry — context for trader
   };
   riskReward: {
     toT1: number;
@@ -185,6 +244,9 @@ export interface ScreenerFilters {
   excludeADRs?: boolean;
   sector?: string;
   includeBearishSetups?: boolean;
+  // New filters
+  minRSRating?: number;        // Min RS rating (0–100). Recommended: 70 for longs
+  excludeEarningsRisk?: boolean; // Exclude tickers with earnings within 14 days
 }
 
 export interface ScreenerResult {
@@ -201,6 +263,11 @@ export interface ScreenerResult {
   keyConfirmingFactors: string[];
   analystRating: AnalystRating;
   timestamp: string;
+
+  // ── New fields ────────────────────────────────────────────────────────────
+  rsAnalysis?: RSAnalysis;
+  earningsData?: EarningsData;
+  atrData?: ATRData;
 }
 
 // =============================================================================
@@ -230,6 +297,11 @@ export interface DeepAnalysisResult {
   analystRatingBreakdown: Record<string, number>;
   marketRegime: MarketRegimeResult;
   timestamp: string;
+
+  // ── New fields ────────────────────────────────────────────────────────────
+  rsAnalysis?: RSAnalysis;
+  earningsData?: EarningsData;
+  atrData?: ATRData;
 }
 
 // =============================================================================
