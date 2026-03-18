@@ -212,9 +212,15 @@ export async function screenTicker(
 
   const shortInterestPromise = FEATURES.SHORT_INTEREST ? getShortInterest(ticker) : Promise.resolve(undefined);
   const preMarketPromise = FEATURES.PREMARKET_CONTEXT ? getPreMarketContext(ticker) : Promise.resolve(null);
+  const wsPromise = FEATURES.WALL_STREET_CONSENSUS
+    ? computeWallStreetConsensus(ticker, price, primary.tradeParams.analystRating)
+    : Promise.resolve(undefined);
+  const newsPromise = FEATURES.NEWS_SENTIMENT
+    ? getCompanyNews(ticker, 2)
+    : Promise.resolve(null);
   const [wsResult, newsResult, shortResult, preMarketResult] = await Promise.allSettled([
-    computeWallStreetConsensus(ticker, price, primary.tradeParams.analystRating),
-    getCompanyNews(ticker, 2),
+    wsPromise,
+    newsPromise,
     shortInterestPromise,
     preMarketPromise,
   ]);
@@ -435,12 +441,16 @@ export async function analyzeTicker(
   const volAnalysis = volumeAnalysis(daily);
 
   const preMarketPromise = FEATURES.PREMARKET_CONTEXT ? getPreMarketContext(ticker) : Promise.resolve(null);
+  const wsPromise2 = FEATURES.WALL_STREET_CONSENSUS && primary
+    ? computeWallStreetConsensus(ticker, price, primary.tradeParams.analystRating)
+    : Promise.resolve(undefined);
+  const newsPromise2 = FEATURES.NEWS_SENTIMENT
+    ? getCompanyNews(ticker, 2)
+    : Promise.resolve(null);
   const [regimeResult, wsResult, newsResult, preMarketResult] = await Promise.allSettled([
     getMarketRegime(useMock),
-    primary
-      ? computeWallStreetConsensus(ticker, price, primary.tradeParams.analystRating)
-      : Promise.resolve(undefined),
-    getCompanyNews(ticker, 2),
+    wsPromise2,
+    newsPromise2,
     preMarketPromise,
   ]);
   const regime = regimeResult.status === "fulfilled" ? regimeResult.value : null;
