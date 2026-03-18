@@ -1,42 +1,62 @@
+import { getQuote } from "@/lib/utils/finnhub";
+
+export interface PreMarketContext {
+  preMarketPrice?: number;
+  preMarketChange?: number;
+  preMarketVolume?: number;
+  hasSignificantGap: boolean;
+  gapDirection: "up" | "down" | "flat";
+}
+
 /**
- * US market hours (Eastern)
- * Pre-market: 4:00 AM - 9:30 AM
- * Regular: 9:30 AM - 4:00 PM
- * After-hours: 4:00 PM - 8:00 PM
+ * Get pre-market context from Finnhub quote.
+ * c = current/last, pc = previous close.
+ * Before market open, c reflects pre-market price.
  */
+export async function getPreMarketContext(
+  ticker: string
+): Promise<PreMarketContext | null> {
+  try {
+    const quote = await getQuote(ticker);
+    if (!quote || !quote.pc || quote.pc === 0) return null;
 
-export function getMarketStatus(): {
-  status: "open" | "pre-market" | "after-hours" | "closed";
-  label: string;
-  timeStr: string;
-} {
-  const now = new Date();
-  const est = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const hours = est.getHours();
-  const minutes = est.getMinutes();
-  const day = est.getDay();
-  const timeStr = est.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
+    const current = quote.c ?? quote.o ?? quote.pc;
+    const prevClose = quote.pc;
+    const changePct = ((current - prevClose) / prevClose) * 100;
+
+    const hasSignificantGap = Math.abs(changePct) > 2;
+    const gapDirection: "up" | "down" | "flat" =
+      changePct > 0.5 ? "up" : changePct < -0.5 ? "down" : "flat";
+
+    return {
+      preMarketPrice: current,
+      preMarketChange: changePct,
+      hasSignificantGap,
+      gapDirection,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if we're before market open or in first hour (Eastern).
+ * Pre-market: 4:00–9:30 ET. First hour: 9:30–10:30 ET.
+ */
+export function isPreMarketOrFirstHour(): boolean {
+  const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: false,
   });
+  const parts = formatter.formatToParts(new Date());
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+  const etMins = hour * 60 + minute;
 
-  const isWeekend = day === 0 || day === 6;
-  const timeMins = hours * 60 + minutes;
+  const preMarketStart = 4 * 60;
+  const firstHourEnd = 10 * 60 + 30;
 
-  if (isWeekend) {
-    return { status: "closed", label: "○ MARKET CLOSED", timeStr: `${timeStr} EST` };
-  }
-
-  if (timeMins >= 9 * 60 + 30 && timeMins < 16 * 60) {
-    return { status: "open", label: "● MARKET OPEN", timeStr: `${timeStr} EST` };
-  }
-  if (timeMins >= 4 * 60 && timeMins < 9 * 60 + 30) {
-    return { status: "pre-market", label: `○ PRE-MARKET ${timeStr}`, timeStr: `${timeStr} EST` };
-  }
-  if (timeMins >= 16 * 60 && timeMins < 20 * 60) {
-    return { status: "after-hours", label: `○ AFTER-HOURS ${timeStr}`, timeStr: `${timeStr} EST` };
-  }
-
-  return { status: "closed", label: "○ MARKET CLOSED", timeStr: `${timeStr} EST` };
+  return etMins >= preMarketStart && etMins < firstHourEnd;
 }
