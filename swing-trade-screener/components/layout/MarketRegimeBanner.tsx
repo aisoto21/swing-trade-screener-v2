@@ -23,13 +23,18 @@ export function MarketRegimeBanner({ regime, breadth, lastUpdated }: MarketRegim
   const label = regime?.regime ?? "CHOPPY";
   const isChoppy = label === "Choppy/Sideways" || label === "CHOPPY";
 
-  const breadthColor =
-    breadth != null
-      ? breadth.percentAbove50SMA > 70
-        ? "text-[var(--signal-long)]"
-        : breadth.percentAbove50SMA >= 50
-          ? "text-[var(--regime-choppy)]"
-          : "text-[var(--regime-bear)]";
+  const BREADTH_COLORS: Record<string, string> = {
+    high: "text-[var(--signal-long)]",
+    mid: "text-[var(--regime-choppy)]",
+    low: "text-[var(--regime-bear)]",
+  };
+  let breadthKey: string | null = null;
+  if (breadth != null) {
+    if (breadth.percentAbove50SMA >= 70) breadthKey = "high";
+    else if (breadth.percentAbove50SMA >= 50) breadthKey = "mid";
+    else breadthKey = "low";
+  }
+  const breadthColor = breadthKey != null ? BREADTH_COLORS[breadthKey] : "";
 
   return (
     <div
