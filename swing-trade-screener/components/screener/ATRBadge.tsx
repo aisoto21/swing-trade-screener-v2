@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils/cn";
 
 interface ATRBadgeProps {
   atr: ATRData;
-  stopAtrMultiple?: number; // From TradeParameters.stop.atrMultiple
+  stopAtrMultiple?: number;
   className?: string;
 }
 
@@ -35,8 +35,8 @@ export const ATRBadge = memo(function ATRBadge({
         </span>
       )}
 
-      {/* Tooltip */}
-      <div className="absolute bottom-full left-0 z-[200] mb-1 hidden w-60 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
+      {/* Tooltip — pops DOWN to avoid clipping into sticky headers above */}
+      <div className="absolute top-full left-0 z-[200] mt-1 hidden w-60 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
         <p className="mb-1 font-mono text-xs font-semibold text-[var(--text-primary)]">
           Volatility Context (ATR 14)
         </p>
@@ -52,15 +52,11 @@ export const ATRBadge = memo(function ATRBadge({
           {stopAtrMultiple !== undefined && (
             <div className="flex justify-between">
               <span className="text-[var(--text-muted)]">Stop distance</span>
-              <span
-                className={
-                  stopAtrMultiple < 0.8
-                    ? "text-[var(--signal-short)]"
-                    : stopAtrMultiple > 2
-                    ? "text-[var(--regime-choppy)]"
-                    : "text-[var(--signal-long)]"
-                }
-              >
+              <span className={
+                stopAtrMultiple < 0.8 ? "text-[var(--signal-short)]"
+                : stopAtrMultiple > 2 ? "text-[var(--regime-choppy)]"
+                : "text-[var(--signal-long)]"
+              }>
                 {stopAtrMultiple.toFixed(2)}× ATR
               </span>
             </div>
