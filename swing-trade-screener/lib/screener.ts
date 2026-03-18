@@ -4,33 +4,96 @@ import type {
   ScreenerFilters,
   DeepAnalysisResult,
   MarketRegimeResult,
+  ATRData,
 } from "@/types";
 import { SCREENING_UNIVERSE, UNIVERSE } from "@/constants/universe";
 import {
   MIN_PRICE,
   MIN_AVG_VOLUME,
-  MIN_MARKET_CAP,
 } from "@/constants/indicators";
 import { fetchOHLCV } from "@/lib/dataFetcher";
 import { sma50, sma200 } from "@/lib/indicators/sma";
 import { ema9 } from "@/lib/indicators/ema";
 import { rsiFull } from "@/lib/indicators/rsi";
 import { macdFull } from "@/lib/indicators/macd";
-import { vwap } from "@/lib/indicators/vwap";
+import { sessionVWAP, vwapAnchored } from "@/lib/indicators/vwap"; // Updated import
 import { bollingerBands } from "@/lib/indicators/bollingerBands";
 import { fibonacci } from "@/lib/indicators/fibonacci";
 import { supportResistance } from "@/lib/indicators/supportResistance";
 import { detectCandlePatterns } from "@/lib/indicators/candlePatterns";
 import { volumeAnalysis } from "@/lib/indicators/volumeAnalysis";
+import { atr, currentATR, atrPercent } from "@/lib/indicators/atr";
+import { computeRSAnalysis } from "@/lib/indicators/relativeStrength";
 import { classifySetups } from "@/lib/scoring/tradeSetupClassifier";
 import { detectMarketRegime } from "@/lib/utils/marketRegime";
+import { getEarningsCalendar } from "@/lib/utils/finnhub";
 
 function toOHLCV(bars: OHLCVBar[]): OHLCVBar[] {
   return bars;
 }
 
 /**
- * Run full screening for a single ticker
+ * Fetch and cache SPY bars for RS computation.
+ * Keyed per process to avoid redundant fetches across a screener run.
+ */
+let _spyBarsCache: OHLCVBar[] | null = null;
+let _spyCacheTime = 0;
+
+async function getSpyBars(useMock: boolean): Promise<OHLCVBar[]> {
+  const now = Date.now();
+  // Cache for 5 minutes to avoid re-fetching SPY for every ticker in a batch
+  if (_spyBarsCache && now - _spyCacheTime < 300_000) return _spyBarsCache;
+  _spyBarsCache = await fetchOHLCV("SPY", "1D", useMock);
+  _spyCacheTime = now;
+  return _spyBarsCache;
+}
+
+/**
+ * Compute earnings risk for a ticker.
+ * Gracefully degrades to UNKNOWN if Finnhub key is not set.
+ */
+async function computeEarningsData(ticker: string) {
+  try {
+    const earningsData = await getEarningsCalendar(ticker);
+    if (!earningsData || earningsData.length === 0) {
+      return {
+        daysToEarnings: 999,
+        nextEarningsDate: undefined,
+        riskLevel: "UNKNOWN" as const,
+        insideEarningsWindow: false,
+      };
+    }
+
+    const next = earningsData[0];
+    const daysToEarnings = Math.ceil(
+      (new Date(next.period).getTime() - Date.now()) / 86400000
+    );
+
+    const riskLevel =
+      daysToEarnings <= 7
+        ? "HIGH"
+        : daysToEarnings <= 21
+        ? "MODERATE"
+        : "LOW";
+
+    return {
+      daysToEarnings,
+      nextEarningsDate: next.period,
+      riskLevel: riskLevel as "HIGH" | "MODERATE" | "LOW",
+      insideEarningsWindow: daysToEarnings <= 14,
+    };
+  } catch {
+    return {
+      daysToEarnings: 999,
+      nextEarningsDate: undefined,
+      riskLevel: "UNKNOWN" as const,
+      insideEarningsWindow: false,
+    };
+  }
+}
+
+/**
+ * Run full screening for a single ticker.
  */
 export async function screenTicker(
   ticker: string,
@@ -41,13 +104,14 @@ export async function screenTicker(
     ticker,
     companyName: ticker,
     sector: "Unknown",
-    marketCapTier: "large",
+    marketCapTier: "large" as const,
   };
 
-  const [daily, fourHour, fifteenMin] = await Promise.all([
+  const [daily, fourHour, fifteenMin, spyBars] = await Promise.all([
     fetchOHLCV(ticker, "1D", useMock),
     fetchOHLCV(ticker, "4H", useMock),
     fetchOHLCV(ticker, "15M", useMock),
+    getSpyBars(useMock),
   ]);
 
   if (daily.length < 50) return null;
@@ -56,14 +120,21 @@ export async function screenTicker(
   const prevClose = daily[daily.length - 2]?.close ?? price;
   const priceChangePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
 
+  // ── Volume pre-filter (using actual avg volume, not market cap hack) ──────
   const avgVolume20 =
-    daily.slice(-20).reduce((s, b) => s + b.volume, 0) / Math.min(20, daily.length);
-  const marketCap = price * 1e9;
+    daily.slice(-20).reduce((s, b) => s + b.volume, 0) /
+    Math.min(20, daily.length);
 
   if (price < filters.minPrice) return null;
   if (avgVolume20 < filters.minVolume) return null;
-  if (marketCap < filters.minMarketCap) return null;
 
+  // NOTE: Removed the broken `price * 1e9` market cap filter.
+  // avgVolume is a better liquidity proxy for swing trading anyway.
+  // Real market cap requires sharesOutstanding from the quote endpoint.
+  // TODO: Pull sharesOutstanding from Yahoo quote API if market cap
+  //       filtering is critical for your universe.
+
+  // ── Indicators ────────────────────────────────────────────────────────────
   const sma50Daily = sma50(daily);
   const sma200Daily = sma200(daily);
   const ema9Daily = ema9(daily);
@@ -71,6 +142,36 @@ export async function screenTicker(
   const ema9_15M = ema9(fifteenMin);
   const sma50_4H = sma50(fourHour.length >= 50 ? fourHour : daily);
 
+  // VWAP: use anchored VWAP for daily, session VWAP for intraday
+  const avwapLong = vwapAnchored(daily, "LONG");
+  const avwapShort = vwapAnchored(daily, "SHORT");
+  const vwap4H = sessionVWAP(fourHour);
+  const vwap15M = sessionVWAP(fifteenMin);
+
+  // ATR
+  const atrValues = atr(daily, 14);
+  const atrCurrent = currentATR(daily, 14);
+  const atrPct = atrPercent(daily, 14);
+  const atrData: ATRData = {
+    values: atrValues,
+    current: atrCurrent,
+    atrPercent: atrPct,
+  };
+
+  // Relative Strength
+  const rsAnalysis =
+    spyBars.length > 0 ? computeRSAnalysis(daily, spyBars) : undefined;
+
+  // RS filter — skip tickers that are obvious laggards for long setups
+  if (
+    filters.minRSRating !== undefined &&
+    rsAnalysis &&
+    rsAnalysis.rating < filters.minRSRating
+  ) {
+    return null;
+  }
+
+  // Setup classification
   const setups = classifySetups({
     daily: toOHLCV(daily),
     fourHour: toOHLCV(fourHour),
@@ -82,8 +183,10 @@ export async function screenTicker(
     macd4H: macdFull(fourHour),
     bbDaily: bollingerBands(daily),
     bb4H: bollingerBands(fourHour),
-    vwap4H: vwap(fourHour),
-    vwap15M: vwap(fifteenMin),
+    vwap4H,
+    vwap15M,
+    avwapLong,   // anchored VWAP for daily long setups
+    avwapShort,  // anchored VWAP for daily short setups
     volumeDaily: volumeAnalysis(daily),
     volume4H: volumeAnalysis(fourHour),
     srDaily: supportResistance(daily),
@@ -96,10 +199,12 @@ export async function screenTicker(
     ema9_4H,
     ema9_15M,
     sma50_4H,
+    atrDaily: atrValues,
     accountSize: filters.accountSize,
     riskPerTrade: filters.riskPerTrade,
   });
 
+  // Apply filters
   const filtered = setups.filter((s) => {
     if (filters.biasFilter !== "BOTH" && s.bias !== filters.biasFilter) return false;
     const gradeOrder = { "A+": 4, A: 3, B: 2, C: 1 };
@@ -116,8 +221,25 @@ export async function screenTicker(
 
   if (filtered.length === 0) return null;
 
+  // Earnings data (async, non-blocking to screener performance)
+  const earningsData = await computeEarningsData(ticker);
+
+  // Optionally filter out high-earnings-risk tickers
+  if (filters.excludeEarningsRisk && earningsData.insideEarningsWindow) {
+    return null;
+  }
+
   const primary = filtered[0];
   const volAnalysis = volumeAnalysis(daily);
+
+  // Estimated market cap from shares outstanding if available
+  // For now we use a tier-based approximation from universe data
+  const marketCapEstimate =
+    stock.marketCapTier === "mega"
+      ? price * 5e9
+      : stock.marketCapTier === "large"
+      ? price * 2e9
+      : price * 5e8;
 
   return {
     ticker,
@@ -125,7 +247,7 @@ export async function screenTicker(
     sector: stock.sector,
     price,
     priceChangePercent,
-    marketCap,
+    marketCap: marketCapEstimate,
     setups: filtered,
     primarySetup: primary,
     volumeVsAvg: volAnalysis.currentVsAvg,
@@ -133,6 +255,9 @@ export async function screenTicker(
     keyConfirmingFactors: primary.confirmingFactors.slice(0, 5),
     analystRating: primary.tradeParams.analystRating,
     timestamp: new Date().toISOString(),
+    rsAnalysis,
+    earningsData,
+    atrData,
   };
 }
 
@@ -185,10 +310,11 @@ export async function analyzeTicker(
   accountSize: number = 25000,
   riskPerTrade: number = 0.01
 ): Promise<DeepAnalysisResult | null> {
-  const [daily, fourHour, fifteenMin] = await Promise.all([
+  const [daily, fourHour, fifteenMin, spyBars] = await Promise.all([
     fetchOHLCV(ticker, "1D", useMock),
     fetchOHLCV(ticker, "4H", useMock),
     fetchOHLCV(ticker, "15M", useMock),
+    getSpyBars(useMock),
   ]);
 
   if (daily.length < 50) return null;
@@ -197,13 +323,18 @@ export async function analyzeTicker(
     ticker,
     companyName: ticker,
     sector: "Unknown",
-    marketCapTier: "large",
+    marketCapTier: "large" as const,
   };
 
   const price = daily[daily.length - 1]?.close ?? 0;
   const prevClose = daily[daily.length - 2]?.close ?? price;
   const priceChangePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
-  const marketCap = price * 1e9;
+  const marketCap =
+    stock.marketCapTier === "mega"
+      ? price * 5e9
+      : stock.marketCapTier === "large"
+      ? price * 2e9
+      : price * 5e8;
 
   const sma50Daily = sma50(daily);
   const sma200Daily = sma200(daily);
@@ -211,6 +342,24 @@ export async function analyzeTicker(
   const ema9_4H = ema9(fourHour);
   const ema9_15M = ema9(fifteenMin);
   const sma50_4H = sma50(fourHour.length >= 50 ? fourHour : daily);
+  const atrValues = atr(daily, 14);
+  const atrCurrent = currentATR(daily, 14);
+  const atrPct = atrPercent(daily, 14);
+
+  const avwapLong = vwapAnchored(daily, "LONG");
+  const avwapShort = vwapAnchored(daily, "SHORT");
+  const vwap4H = sessionVWAP(fourHour);
+  const vwap15M = sessionVWAP(fifteenMin);
+
+  const rsAnalysis =
+    spyBars.length > 0 ? computeRSAnalysis(daily, spyBars) : undefined;
+  const earningsData = await computeEarningsData(ticker);
+
+  const atrData: ATRData = {
+    values: atrValues,
+    current: atrCurrent,
+    atrPercent: atrPct,
+  };
 
   const setups = classifySetups({
     daily: toOHLCV(daily),
@@ -223,8 +372,10 @@ export async function analyzeTicker(
     macd4H: macdFull(fourHour),
     bbDaily: bollingerBands(daily),
     bb4H: bollingerBands(fourHour),
-    vwap4H: vwap(fourHour),
-    vwap15M: vwap(fifteenMin),
+    vwap4H,
+    vwap15M,
+    avwapLong,
+    avwapShort,
     volumeDaily: volumeAnalysis(daily),
     volume4H: volumeAnalysis(fourHour),
     srDaily: supportResistance(daily),
@@ -237,6 +388,7 @@ export async function analyzeTicker(
     ema9_4H,
     ema9_15M,
     sma50_4H,
+    atrDaily: atrValues,
     accountSize,
     riskPerTrade,
   });
@@ -244,10 +396,6 @@ export async function analyzeTicker(
   const primary = setups[0];
   const volAnalysis = volumeAnalysis(daily);
   const regime = await getMarketRegime(useMock);
-
-  const momentum = 60;
-  const trend = 65;
-  const volume = 55;
 
   if (!primary) return null;
 
@@ -269,6 +417,9 @@ export async function analyzeTicker(
         bollingerBands: bollingerBands(daily),
         fibonacci: fibonacci(daily),
         supportResistance: supportResistance(daily),
+        avwapLong,
+        avwapShort,
+        atr: atrValues,
       },
       fourHour: {
         sma50: sma50_4H,
@@ -276,12 +427,12 @@ export async function analyzeTicker(
         rsi: rsiFull(fourHour),
         macd: macdFull(fourHour),
         bollingerBands: bollingerBands(fourHour),
-        vwap: vwap(fourHour),
+        vwap: vwap4H,
       },
       fifteenMin: {
         ema9: ema9_15M,
         rsi: rsiFull(fifteenMin),
-        vwap: vwap(fifteenMin),
+        vwap: vwap15M,
       },
     },
     volumeAnalysis: volAnalysis,
@@ -292,10 +443,13 @@ export async function analyzeTicker(
       ...detectCandlePatterns(fourHour, "4H"),
     ],
     setups,
-    primarySetup: primary!,
-    analystRating: primary?.tradeParams.analystRating ?? "Watch",
-    analystRatingBreakdown: { momentum, trend, volume },
+    primarySetup: primary,
+    analystRating: primary.tradeParams.analystRating,
+    analystRatingBreakdown: { momentum: 60, trend: 65, volume: 55 },
     marketRegime: regime,
     timestamp: new Date().toISOString(),
+    rsAnalysis,
+    earningsData,
+    atrData,
   };
 }
