@@ -13,9 +13,6 @@ export interface OHLCVBar {
 
 export type Timeframe = "1D" | "4H" | "15M";
 
-// Separate type for setup timeframe labels (avoids silent mismatch bug)
-export type SetupTimeframe = "Daily" | "4H" | "15M";
-
 // =============================================================================
 // INDICATOR TYPES
 // =============================================================================
@@ -31,7 +28,7 @@ export interface RSIData {
   values: number[];
   overbought: boolean;
   oversold: boolean;
-  divergence?: "bullish" | "bearish" | null;
+  divergence?: "bullish" | "bearish" | "hidden_bullish" | "hidden_bearish" | null;
 }
 
 export interface MACDData {
@@ -54,9 +51,6 @@ export interface BollingerBandsData {
 export interface VWAPData {
   values: number[];
   priceAbove: boolean;
-  /** Present on anchored VWAP only */
-  anchorIndex?: number;
-  anchorDate?: string;
 }
 
 export interface SupportResistanceLevel {
@@ -82,64 +76,46 @@ export interface CandlestickPattern {
   barIndex: number;
 }
 
-/**
- * Enhanced VolumeAnalysis with directional context signals.
- * The same volume reading means completely different things
- * depending on price location and candle close direction.
- */
 export interface VolumeAnalysis {
   avgVolume20: number;
   currentVsAvg: number;
   classification: "Institutional Confirmation" | "Climactic / Exhaustion Risk" | "Weak / No Confirmation";
   volumeTrend: "expanding" | "contracting" | "neutral";
   obvSlope: "up" | "down" | "neutral";
-
-  // ── New directional context fields ──────────────────────────────────────
-  /** High volume + bullish close + price breaking above recent resistance */
-  volumeOnBreakout: boolean;
-  /** Climactic volume + close reversal (exhaustion signal) */
-  volumeOnReversal: boolean;
-  /** High volume + bearish close near resistance (smart money distribution) */
-  distributionSignal: boolean;
-  /** High volume + bullish close near support (institutional accumulation) */
-  accumulationSignal: boolean;
 }
 
-/**
- * ATR analysis for stop validation and volatility context.
- */
-export interface ATRData {
-  values: number[];
-  current: number;
-  atrPercent: number; // ATR as % of price
-  stopValidation?: {
-    valid: boolean;
-    atrMultiple: number;
-    reason?: string;
-  };
+export interface GapInfo {
+  type: "up" | "down";
+  sizePct: number;
+  top: number;
+  bottom: number;
+  filled: boolean;
+  barIndex: number;
 }
 
-/**
- * Relative Strength vs. benchmark (SPY).
- * This is the single most important filter for long setups.
- */
-export interface RSAnalysis {
-  rs63: number;   // 1-quarter RS (core signal)
-  rs252: number;  // 1-year RS (trend context)
-  rating: number; // 0–100 approximation of IBD RS Rating
-  trending: boolean;   // Short-term RS accelerating vs long-term
-  rsNewHigh: boolean;  // RS line at 52-week high (leading signal)
-  classification: "Leader" | "Outperformer" | "Neutral" | "Laggard" | "Avoid";
+export interface GapAnalysis {
+  gap: GapInfo | null;
+  setup: "Gap and Go" | "Gap Fill" | "Gap Rejection" | null;
+  bias: "LONG" | "SHORT" | null;
 }
 
-/**
- * Earnings risk context.
- */
-export interface EarningsData {
-  daysToEarnings: number;
-  nextEarningsDate?: string;
-  riskLevel: "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
-  insideEarningsWindow: boolean; // within 14 days
+export interface SectorRSResult {
+  sector: string;
+  sectorETF: string;
+  sectorRS: number;
+  sectorRank: number;
+  sectorTrend: "improving" | "deteriorating" | "stable";
+  isLeadingSector: boolean;
+  isWeakSector: boolean;
+}
+
+export interface NewsSentiment {
+  sentiment: "positive" | "negative" | "neutral";
+  headlineCount: number;
+  negativeHeadlines: string[];
+  positiveHeadlines: string[];
+  hasHighImpactNews: boolean;
+  riskFlag: boolean;
 }
 
 // =============================================================================
@@ -160,6 +136,20 @@ export type HoldDuration =
   | "Swing"
   | "Extended Swing";
 
+export interface EconomicEvent {
+  date: string;
+  name: string;
+  impact: "HIGH" | "MEDIUM";
+  description: string;
+}
+
+export interface EconomicRisk {
+  hasNearTermEvent: boolean;
+  nextEvent?: EconomicEvent;
+  daysUntilEvent?: number;
+  riskLevel: "HIGH" | "MODERATE" | "NONE";
+}
+
 export type AnalystRating =
   | "Strong Buy"
   | "Buy"
@@ -172,7 +162,7 @@ export type AnalystRating =
 export interface SetupResult {
   name: string;
   bias: Bias;
-  timeframe: SetupTimeframe; // Fixed: was Timeframe (mismatch with "Daily" strings)
+  timeframe: Timeframe;
   grade: SetupGrade;
   confirmingFactors: string[];
   riskFactors: string[];
@@ -193,7 +183,6 @@ export interface TradeParameters {
     price: number;
     type: StopType;
     riskPercent: number;
-    atrMultiple?: number; // How many ATRs from entry — context for trader
   };
   riskReward: {
     toT1: number;
@@ -208,6 +197,7 @@ export interface TradeParameters {
   };
   holdDuration: HoldDuration;
   analystRating: AnalystRating;
+  economicRisk?: EconomicRisk;
 }
 
 // =============================================================================
@@ -230,6 +220,15 @@ export interface MarketRegimeResult {
   timestamp: string;
 }
 
+export type SizingMethod = "fixed_risk" | "half_kelly" | "full_kelly";
+
+export interface KellyParams {
+  closedTrades: number;
+  winRate: number;
+  avgWinPercent: number;
+  avgLossPercent: number;
+}
+
 export interface ScreenerFilters {
   minPrice: number;
   minVolume: number;
@@ -239,14 +238,36 @@ export interface ScreenerFilters {
   minRR: number;
   accountSize: number;
   riskPerTrade: number;
+  sizingMethod?: SizingMethod;
+  kellyParams?: KellyParams;
   excludeETFs?: boolean;
   excludeOTC?: boolean;
   excludeADRs?: boolean;
   sector?: string;
   includeBearishSetups?: boolean;
-  // New filters
-  minRSRating?: number;        // Min RS rating (0–100). Recommended: 70 for longs
-  excludeEarningsRisk?: boolean; // Exclude tickers with earnings within 14 days
+}
+
+export interface WallStreetConsensus {
+  strongBuy: number;
+  buy: number;
+  hold: number;
+  sell: number;
+  strongSell: number;
+  totalAnalysts: number;
+  consensusLabel: "Strong Buy" | "Buy" | "Hold" | "Sell" | "Strong Sell" | "No Coverage";
+  meanPriceTarget?: number;
+  highPriceTarget?: number;
+  lowPriceTarget?: number;
+  upsideToMean?: number;
+  edgeScreenAgreement: "agrees" | "disagrees" | "neutral";
+}
+
+export interface ShortInterestData {
+  shortPercentOfFloat: number;
+  shortRatio: number;
+  isHighShortInterest: boolean;
+  squeezeCandidate: boolean;
+  source: "yahoo" | "finnhub";
 }
 
 export interface ScreenerResult {
@@ -262,12 +283,14 @@ export interface ScreenerResult {
   volumeClassification: VolumeAnalysis["classification"];
   keyConfirmingFactors: string[];
   analystRating: AnalystRating;
+  wallStreetConsensus?: WallStreetConsensus;
+  gapAnalysis?: GapAnalysis;
+  sectorRS?: SectorRSResult;
+  newsSentiment?: NewsSentiment;
+  shortInterest?: ShortInterestData;
+  rsAnalysis?: import("@/lib/indicators/relativeStrength").RSAnalysis;
+  preMarketContext?: import("@/lib/utils/marketHours").PreMarketContext;
   timestamp: string;
-
-  // ── New fields ────────────────────────────────────────────────────────────
-  rsAnalysis?: RSAnalysis;
-  earningsData?: EarningsData;
-  atrData?: ATRData;
 }
 
 // =============================================================================
@@ -296,12 +319,12 @@ export interface DeepAnalysisResult {
   analystRating: AnalystRating;
   analystRatingBreakdown: Record<string, number>;
   marketRegime: MarketRegimeResult;
+  wallStreetConsensus?: WallStreetConsensus;
+  gapAnalysis?: GapAnalysis;
+  sectorRS?: SectorRSResult;
+  newsSentiment?: NewsSentiment;
+  preMarketContext?: import("@/lib/utils/marketHours").PreMarketContext;
   timestamp: string;
-
-  // ── New fields ────────────────────────────────────────────────────────────
-  rsAnalysis?: RSAnalysis;
-  earningsData?: EarningsData;
-  atrData?: ATRData;
 }
 
 // =============================================================================
