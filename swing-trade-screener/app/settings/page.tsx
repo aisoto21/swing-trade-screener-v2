@@ -2,11 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
+import { useTradeLogStore } from "@/lib/stores/tradeLogStore";
+import { computePerformanceMetrics } from "@/lib/utils/performanceAnalytics";
 import Link from "next/link";
 import { cn } from "@/lib/utils/cn";
 
 export default function SettingsPage() {
   const settings = useSettingsStore();
+  const trades = useTradeLogStore((s) => s.trades);
+  const perf = computePerformanceMetrics(trades);
+  const closedTradesCount = perf.totalTrades;
   const [saved, setSaved] = useState(false);
   const [optionsSource, setOptionsSource] = useState<string>("yahoo-finance2 (free)");
   const [optionsSectionOpen, setOptionsSectionOpen] = useState(false);
@@ -88,6 +93,51 @@ export default function SettingsPage() {
                   }
                   className="w-full accent-[var(--signal-neutral)]"
                 />
+              </div>
+              <div>
+                <label className="mb-2 block font-mono text-xs text-[var(--text-muted)]">
+                  Position Sizing Method
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {(["fixed_risk", "half_kelly", "full_kelly"] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => settings.update({ sizingMethod: opt })}
+                      className={cn(
+                        "rounded border px-3 py-2 font-mono text-xs transition-colors",
+                        settings.sizingMethod === opt
+                          ? "border-[var(--signal-neutral)] bg-[var(--background-elevated)] text-[var(--text-primary)]"
+                          : "border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      )}
+                    >
+                      {opt === "fixed_risk"
+                        ? "Fixed Risk"
+                        : opt === "half_kelly"
+                        ? "Half Kelly"
+                        : "Full Kelly"}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 font-sans text-[11px] text-[var(--text-muted)]">
+                  {settings.sizingMethod === "fixed_risk" &&
+                    "Risk exactly X% per trade"}
+                  {settings.sizingMethod === "half_kelly" &&
+                    "Dynamically sized based on your win rate (requires 20+ trades)"}
+                  {settings.sizingMethod === "full_kelly" &&
+                    "Aggressive Kelly sizing (not recommended for most traders)"}
+                </p>
+                {(settings.sizingMethod === "half_kelly" ||
+                  settings.sizingMethod === "full_kelly") &&
+                  closedTradesCount < 20 && (
+                    <p className="mt-2 rounded border border-[var(--regime-choppy)]/50 bg-[var(--regime-choppy)]/10 px-3 py-2 font-sans text-xs text-[var(--regime-choppy)]">
+                      {settings.sizingMethod === "half_kelly"
+                        ? "Half"
+                        : "Full"}{" "}
+                      Kelly requires at least 20 closed trades to be
+                      statistically meaningful. You have {closedTradesCount}{" "}
+                      trades. Using Fixed Risk until threshold is met.
+                    </p>
+                  )}
               </div>
             </div>
           </section>
