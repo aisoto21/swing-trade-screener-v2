@@ -49,23 +49,18 @@ export const RSBadge = memo(function RSBadge({ rs, className }: RSBadgeProps) {
           style.color
         )}
       >
-        {/* RS trend arrow */}
         {rs.trending && (
-          <span className="text-[var(--signal-long)]" title="RS trending higher (short-term RS accelerating)">
-            ↑
-          </span>
+          <span className="text-[var(--signal-long)]" title="RS trending higher">↑</span>
         )}
         {rs.rsNewHigh && (
-          <span className="text-[var(--grade-aplus)]" title="RS line at 52-week high">
-            ★
-          </span>
+          <span className="text-[var(--grade-aplus)]" title="RS line at 52-week high">★</span>
         )}
         <span className="tabular-nums">{rs.rating.toFixed(0)}</span>
         <span className="opacity-60">RS</span>
       </span>
 
-      {/* Tooltip */}
-      <div className="absolute bottom-full left-0 z-[200] mb-1 hidden w-64 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
+      {/* Tooltip — pops DOWN to avoid clipping into sticky headers above */}
+      <div className="absolute top-full left-0 z-[200] mt-1 hidden w-64 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
         <p className="mb-1 font-mono text-xs font-semibold text-[var(--text-primary)]">
           Relative Strength vs. SPY
         </p>
