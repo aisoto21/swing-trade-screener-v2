@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import type { SizingMethod } from "@/types";
+
 export interface AppSettings {
   accountSize: number;
   riskPerTrade: number;
+  sizingMethod: SizingMethod;
   maxPositionSize: number;
   minPrice: number;
   minVolume: number;
@@ -29,6 +32,7 @@ export interface AppSettings {
 const DEFAULT: AppSettings = {
   accountSize: 25000,
   riskPerTrade: 0.01,
+  sizingMethod: "fixed_risk",
   maxPositionSize: 0.05,
   minPrice: 10,
   minVolume: 500000,
