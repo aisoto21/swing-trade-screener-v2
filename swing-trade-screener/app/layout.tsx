@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { MarketStatusBar } from "@/components/layout/MarketStatusBar";
 import { RegimeProvider } from "@/components/layout/RegimeProvider";
+import { HubNav } from "@/components/layout/HubNav";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -34,6 +35,7 @@ export default function RootLayout({
         <Providers>
           <MarketStatusBar />
           <RegimeProvider />
+          <HubNav />
           {children}
         </Providers>
       </body>
