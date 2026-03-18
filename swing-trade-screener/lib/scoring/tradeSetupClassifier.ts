@@ -5,6 +5,7 @@ import type {
   Bias,
   SetupGrade,
   HoldDuration,
+  AnalystRating,
 } from "@/types";
 import type { RSIData } from "@/types";
 import type { MACDData } from "@/types";
@@ -14,13 +15,19 @@ import type { VolumeAnalysis } from "@/types";
 import type { SupportResistanceLevel } from "@/types";
 import type { FibonacciLevels } from "@/types";
 import type { CandlestickPattern } from "@/types";
+import type { GapAnalysis, SectorRSResult } from "@/types";
+import type { MarketBreadth } from "@/lib/utils/marketBreadth";
+import { SMA_50_PERIOD, SMA_200_PERIOD } from "@/constants/indicators";
+import { sma50, sma200 } from "@/lib/indicators/sma";
+import { ema9 } from "@/lib/indicators/ema";
 import { momentumScore } from "./momentumScore";
 import { trendScore } from "./trendScore";
 import { volumeScore } from "./volumeScore";
 import { compositeScore, scoreToAnalystRating } from "./compositeScore";
-import { computePositionSizing } from "@/lib/utils/positionSizing";
+import { computePositionSizing, computeKellyPositionSize } from "@/lib/utils/positionSizing";
 import { computeRiskReward } from "@/lib/utils/riskReward";
-import { validateStopVsATR } from "@/lib/indicators/atr";
+import { checkEconomicRisk } from "@/lib/utils/economicCalendar";
+import { computeMTFScore } from "./multiTimeframeScore";
 
 interface IndicatorContext {
   daily: OHLCVBar[];
@@ -35,8 +42,6 @@ interface IndicatorContext {
   bb4H: BollingerBandsData;
   vwap4H: VWAPData;
   vwap15M: VWAPData;
-  avwapLong: VWAPData;   // New: anchored VWAP from swing low
-  avwapShort: VWAPData;  // New: anchored VWAP from swing high
   volumeDaily: VolumeAnalysis;
   volume4H: VolumeAnalysis;
   srDaily: SupportResistanceLevel[];
@@ -49,9 +54,13 @@ interface IndicatorContext {
   ema9_4H: number[];
   ema9_15M: number[];
   sma50_4H: number[];
-  atrDaily: number[];    // New: ATR values for stop validation
   accountSize: number;
   riskPerTrade: number;
+  sizingMethod?: "fixed_risk" | "half_kelly" | "full_kelly";
+  kellyParams?: { closedTrades: number; winRate: number; avgWinPercent: number; avgLossPercent: number };
+  gapAnalysis?: GapAnalysis;
+  sectorRS?: SectorRSResult;
+  breadth?: MarketBreadth | null;
 }
 
 export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tradeParams: TradeParameters }> {
@@ -66,35 +75,76 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
   const s50Prev = ctx.sma50Daily[ctx.sma50Daily.length - 2];
   const s200Prev = ctx.sma200Daily[ctx.sma200Daily.length - 2];
 
-  // ATR for stop validation
-  const atrCurrent = ctx.atrDaily[ctx.atrDaily.length - 1] ?? price * 0.02;
-
   const nearestSupport = ctx.srDaily.find((s) => s.type === "support")?.price ?? price * 0.95;
   const nearestResistance = ctx.srDaily.find((s) => s.type === "resistance")?.price ?? price * 1.05;
 
   const support = ctx.srDaily.filter((s) => s.type === "support").sort((a, b) => b.price - a.price)[0];
   const resistance = ctx.srDaily.filter((s) => s.type === "resistance").sort((a, b) => a.price - b.price)[0];
 
-  // ATR-aware stops: use max(support-based stop, entry - 1.5×ATR)
-  const stopBelowSupport = support
-    ? Math.min(support.price * 0.995, price - atrCurrent * 1.5)
-    : price - atrCurrent * 1.5;
+  const stopBelowSupport = support ? support.price * 0.995 : price * 0.97;
+  const stopAboveResistance = resistance ? resistance.price * 1.005 : price * 1.03;
 
-  const stopAboveResistance = resistance
-    ? Math.max(resistance.price * 1.005, price + atrCurrent * 1.5)
-    : price + atrCurrent * 1.5;
-
-  // Anchored VWAP context
-  const avwapLongValue = ctx.avwapLong.values[ctx.avwapLong.values.length - 1] ?? price;
-  const avwapShortValue = ctx.avwapShort.values[ctx.avwapShort.values.length - 1] ?? price;
-  const priceAboveAvwapLong = price > avwapLongValue;
-  const priceBelowAvwapShort = price < avwapShortValue;
+  const lastDaily = ctx.daily[ctx.daily.length - 1];
+  const last4H = ctx.fourHour[ctx.fourHour.length - 1];
+  const last15M = ctx.fifteenMin[ctx.fifteenMin.length - 1];
+  const rsiLast = ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1];
+  const macdHistLast = ctx.macdDaily.histogram[ctx.macdDaily.histogram.length - 1];
+  const vwapLast = ctx.vwap15M.values[ctx.vwap15M.values.length - 1] ?? 0;
+  const lastCandleBullish15M =
+    last15M && last15M.close > last15M.open;
 
   for (const bias of ["LONG", "SHORT"] as Bias[]) {
-    const mom = momentumScore(ctx.rsiDaily, ctx.macdDaily, bias);
-    const trend = trendScore(ctx.daily, ctx.sma50Daily, ctx.sma200Daily, ctx.ema9Daily, bias);
-    const vol = volumeScore(ctx.volumeDaily, bias);
-    const composite = compositeScore(mom, trend, vol);
+    const mtf = computeMTFScore(
+      bias,
+      {
+        price,
+        sma50: s50 ?? 0,
+        rsi: rsiLast ?? 50,
+        macdHist: macdHistLast ?? 0,
+      },
+      {
+        price,
+        ema9: e9_4H ?? 0,
+        volumeRatio: ctx.volume4H.currentVsAvg,
+      },
+      {
+        price,
+        vwap: vwapLast,
+        lastCandleBullish: lastCandleBullish15M,
+      }
+    );
+
+    if (mtf.alignedCount === 0) continue;
+
+    const sectorMod = ctx.sectorRS
+      ? ctx.sectorRS.sectorRank <= 2
+        ? 1
+        : ctx.sectorRS.sectorRank >= 10
+        ? -1
+        : 0
+      : 0;
+    const applyGradeMod = (g: SetupGrade, mod: 1 | 0 | -1): SetupGrade => {
+      const order: Record<SetupGrade, number> = { "A+": 4, A: 3, B: 2, C: 1 };
+      const grades: SetupGrade[] = ["C", "B", "A", "A+"];
+      const totalMod = mod + sectorMod;
+      const newOrder = Math.max(1, Math.min(4, order[g] + totalMod));
+      return grades[newOrder - 1];
+    };
+
+    const mom = momentumScore(
+      bias === "LONG" ? ctx.rsiDaily : ctx.rsiDaily,
+      bias === "LONG" ? ctx.macdDaily : ctx.macdDaily,
+      bias
+    );
+    const trend = trendScore(
+      ctx.daily,
+      ctx.sma50Daily,
+      ctx.sma200Daily,
+      ctx.ema9Daily,
+      bias
+    );
+    const vol = volumeScore(bias === "LONG" ? ctx.volumeDaily : ctx.volumeDaily, bias);
+    const composite = compositeScore(mom, trend, vol, ctx.breadth, bias);
     const analystRating = scoreToAnalystRating(composite, bias);
 
     const confirmingFactors: string[] = [];
@@ -102,8 +152,13 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
 
     if (ctx.rsiDaily.oversold) confirmingFactors.push("RSI oversold");
     if (ctx.rsiDaily.overbought) confirmingFactors.push("RSI overbought");
-    if (ctx.rsiDaily.divergence === "bullish") confirmingFactors.push("Bullish RSI divergence");
-    if (ctx.rsiDaily.divergence === "bearish") confirmingFactors.push("Bearish RSI divergence");
+    if (ctx.rsiDaily.divergence === "bullish") confirmingFactors.push("Regular bullish RSI divergence");
+    if (ctx.rsiDaily.divergence === "hidden_bullish") confirmingFactors.push("Hidden bullish divergence (trend continuation)");
+    if (ctx.rsiDaily.divergence === "bearish") confirmingFactors.push("Regular bearish RSI divergence");
+    if (ctx.rsiDaily.divergence === "hidden_bearish") confirmingFactors.push("Hidden bearish divergence (trend continuation)");
+    if (ctx.sectorRS?.isLeadingSector) confirmingFactors.push(`Sector (${ctx.sectorRS.sectorETF}) is #${ctx.sectorRS.sectorRank} ranked`);
+    if (ctx.sectorRS?.isWeakSector) riskFactors.push(`Sector (${ctx.sectorRS.sectorETF}) is #${ctx.sectorRS.sectorRank} ranked — weak`);
+    confirmingFactors.push(mtf.description);
     if (ctx.volumeDaily.currentVsAvg >= 1.5) {
       confirmingFactors.push(`Volume ${ctx.volumeDaily.currentVsAvg.toFixed(1)}x avg`);
     }
@@ -116,246 +171,391 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
       }
     }
 
-    // ── New: Volume directional signals ──────────────────────────────────
-    if (bias === "LONG") {
-      if (ctx.volumeDaily.accumulationSignal) confirmingFactors.push("Institutional accumulation signal");
-      if (ctx.volumeDaily.volumeOnBreakout) confirmingFactors.push("Breakout on high volume");
-      if (ctx.volumeDaily.distributionSignal) riskFactors.push("Distribution signal — smart money selling");
-    } else {
-      if (ctx.volumeDaily.distributionSignal) confirmingFactors.push("Distribution signal confirmed");
-      if (ctx.volumeDaily.accumulationSignal) riskFactors.push("Accumulation detected — counter-trend risk");
-    }
-
-    // ── New: Anchored VWAP context ────────────────────────────────────────
-    if (bias === "LONG" && priceAboveAvwapLong) {
-      confirmingFactors.push("Above anchored VWAP (swing low)");
-    } else if (bias === "LONG" && !priceAboveAvwapLong) {
-      riskFactors.push("Below anchored VWAP — cost basis headwind");
-    }
-    if (bias === "SHORT" && priceBelowAvwapShort) {
-      confirmingFactors.push("Below anchored VWAP (swing high)");
-    }
-
-    // ── Existing risk factors ─────────────────────────────────────────────
     if (!isNaN(s200) && price < s200 && bias === "LONG") riskFactors.push("Below 200 SMA");
     if (!isNaN(s200) && price > s200 && bias === "SHORT") riskFactors.push("Above 200 SMA");
 
     if (bias === "LONG") {
-      // Golden Cross
       if (!isNaN(s50) && !isNaN(s200Prev) && !isNaN(s50Prev) && s50 > s200 && s50Prev <= s200Prev) {
-        const tp = buildTradeParams(ctx, bias, "Golden Cross", "Daily", "A+",
-          [...confirmingFactors, "50 SMA crossed above 200 SMA"], riskFactors,
-          price, [nearestSupport, price], stopBelowSupport,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Golden Cross",
+          "Daily",
+          applyGradeMod("A+", mtf.gradeModifier),
+          [...confirmingFactors, "50 SMA crossed above 200 SMA"],
+          riskFactors,
+          price,
+          [nearestSupport, price],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Extended Swing", atrCurrent);
+          "Extended Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // 9 EMA Bounce
       if (!isNaN(e9_4H) && Math.abs(price - e9_4H) / price < 0.02 && ctx.volume4H.currentVsAvg > 1) {
-        const tp = buildTradeParams(ctx, bias, "9 EMA Bounce", "4H", "A",
-          [...confirmingFactors, "Price at 9 EMA on 4H"], riskFactors,
-          price, [e9_4H * 0.998, e9_4H * 1.002], stopBelowSupport,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "9 EMA Bounce",
+          "4H",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Price at 9 EMA on 4H"],
+          riskFactors,
+          price,
+          [e9_4H * 0.998, e9_4H * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // VWAP Reclaim — now using session 4H VWAP for intraday, AVWAP reclaim on daily
       if (ctx.vwap4H.priceAbove && ctx.volume4H.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "VWAP Reclaim", "4H", "A",
-          [...confirmingFactors, "Price reclaimed session VWAP with volume"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "VWAP Reclaim",
+          "4H",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Price above VWAP with volume"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // Anchored VWAP Reclaim (daily) — stronger signal than session VWAP
-      if (priceAboveAvwapLong && ctx.volumeDaily.currentVsAvg >= 1.5 &&
-          price <= avwapLongValue * 1.01) {
-        const tp = buildTradeParams(ctx, bias, "AVWAP Reclaim", "Daily", "A",
-          [...confirmingFactors, "Price reclaimed anchored VWAP from swing low"], riskFactors,
-          price, [avwapLongValue * 0.998, avwapLongValue * 1.002], stopBelowSupport,
-          [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
-        if (tp) setups.push(tp);
-      }
-
-      // BB Squeeze Breakout
       if (ctx.bbDaily.squeeze && ctx.bbDaily.touchingUpper && ctx.volumeDaily.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "Bollinger Band Squeeze Breakout", "Daily", "A",
-          [...confirmingFactors, "BB squeeze breakout with volume"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Bollinger Band Squeeze Breakout",
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "BB squeeze breakout with volume"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [ctx.bbDaily.upper[ctx.bbDaily.upper.length - 1] ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // MA Stack Pullback
-      if (!isNaN(e9) && !isNaN(s50) && !isNaN(s200) &&
-          price > e9 && e9 > s50 && s50 > s200 && price <= s50 * 1.02) {
-        const tp = buildTradeParams(ctx, bias, "MA Stack Pullback", "Daily", "A",
-          [...confirmingFactors, "Pullback to 50 SMA in uptrend"], riskFactors,
-          price, [s50 * 0.998, s50 * 1.002], stopBelowSupport,
+      if (
+        !isNaN(e9) &&
+        !isNaN(s50) &&
+        !isNaN(s200) &&
+        price > e9 &&
+        e9 > s50 &&
+        s50 > s200 &&
+        price <= s50 * 1.02
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "MA Stack Pullback",
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Pullback to 50 SMA in uptrend"],
+          riskFactors,
+          price,
+          [s50 * 0.998, s50 * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // MACD Bullish Cross
-      if (ctx.macdDaily.crossover === "bullish" &&
-          ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] < 60 &&
-          !isNaN(ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1]) &&
-          ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1] < 0) {
-        const tp = buildTradeParams(ctx, bias, "MACD Bullish Cross + RSI < 60", "4H", "B",
-          [...confirmingFactors, "MACD crossover below zero"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+      if (
+        ctx.macdDaily.crossover === "bullish" &&
+        ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] < 60 &&
+        !isNaN(ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1]) &&
+        ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1] < 0
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "MACD Bullish Cross + RSI < 60",
+          "4H",
+          applyGradeMod("B", mtf.gradeModifier),
+          [...confirmingFactors, "MACD crossover below zero"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // Fibonacci Confluence
-      if (ctx.fibDaily.within1Percent && ctx.fibDaily.nearestLevel &&
-          ["38.2%", "50%", "61.8%"].includes(ctx.fibDaily.nearestLevel.level) &&
-          ctx.patternsDaily.some((p) => p.type === "bullish")) {
-        const tp = buildTradeParams(ctx, bias, "Fibonacci Confluence Buy", "Daily", "A",
-          [...confirmingFactors, "At key Fib + bullish candle"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+      if (
+        ctx.fibDaily.within1Percent &&
+        ctx.fibDaily.nearestLevel &&
+        ["38.2%", "50%", "61.8%"].includes(ctx.fibDaily.nearestLevel.level) &&
+        ctx.patternsDaily.some((p) => p.type === "bullish")
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Fibonacci Confluence Buy",
+          "Daily",
+          "A",
+          [...confirmingFactors, "At key Fib + bullish candle"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // Oversold RSI Reversal
-      if (ctx.rsiDaily.oversold && ctx.rsiDaily.divergence === "bullish" &&
-          ctx.volumeDaily.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "Oversold RSI Reversal", "Daily", "B",
-          [...confirmingFactors, "RSI oversold + divergence + volume"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+      if (
+        ctx.rsiDaily.oversold &&
+        ctx.rsiDaily.divergence === "bullish" &&
+        ctx.volumeDaily.currentVsAvg >= 1.5
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Oversold RSI Reversal",
+          "Daily",
+          applyGradeMod("B", mtf.gradeModifier),
+          [...confirmingFactors, "RSI oversold + divergence + volume"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // New: Accumulation + AVWAP setup
-      if (ctx.volumeDaily.accumulationSignal && priceAboveAvwapLong) {
-        const tp = buildTradeParams(ctx, bias, "Institutional Accumulation", "Daily", "A",
-          [...confirmingFactors, "High-volume accumulation above AVWAP"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopBelowSupport,
+      if (
+        ctx.gapAnalysis?.setup &&
+        ctx.gapAnalysis.bias === "LONG" &&
+        ctx.volumeDaily.currentVsAvg >= 1
+      ) {
+        const gapDesc =
+          ctx.gapAnalysis.gap?.type === "up"
+            ? `Gap up ${(ctx.gapAnalysis.gap.sizePct * 100).toFixed(1)}%`
+            : `Gap down ${(ctx.gapAnalysis.gap!.sizePct * 100).toFixed(1)}%`;
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          ctx.gapAnalysis.setup,
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, gapDesc],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopBelowSupport,
           [resistance?.price ?? price * 1.05, price * 1.1, price * 1.15],
-          "Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
-
     } else {
-      // ── SHORT setups ────────────────────────────────────────────────────
-
-      // Death Cross
       if (!isNaN(s50) && !isNaN(s200Prev) && !isNaN(s50Prev) && s50 < s200 && s50Prev >= s200Prev) {
-        const tp = buildTradeParams(ctx, bias, "Death Cross", "Daily", "A+",
-          [...confirmingFactors, "50 SMA crossed below 200 SMA"], riskFactors,
-          price, [price, nearestResistance], stopAboveResistance,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Death Cross",
+          "Daily",
+          applyGradeMod("A+", mtf.gradeModifier),
+          [...confirmingFactors, "50 SMA crossed below 200 SMA"],
+          riskFactors,
+          price,
+          [price, nearestResistance],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Extended Swing", atrCurrent);
+          "Extended Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // 9 EMA Rejection
       if (!isNaN(e9_4H) && Math.abs(price - e9_4H) / price < 0.02 && ctx.volume4H.currentVsAvg > 1) {
-        const tp = buildTradeParams(ctx, bias, "9 EMA Rejection", "4H", "A",
-          [...confirmingFactors, "Price rejected at 9 EMA on 4H"], riskFactors,
-          price, [e9_4H * 0.998, e9_4H * 1.002], stopAboveResistance,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "9 EMA Rejection",
+          "4H",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Price rejected at 9 EMA on 4H"],
+          riskFactors,
+          price,
+          [e9_4H * 0.998, e9_4H * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // VWAP Rejection
       if (!ctx.vwap4H.priceAbove && ctx.volume4H.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "VWAP Rejection", "4H", "A",
-          [...confirmingFactors, "Price rejected at session VWAP"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "VWAP Rejection",
+          "4H",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Price rejected at VWAP"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // AVWAP Rejection (daily)
-      if (priceBelowAvwapShort && ctx.volumeDaily.distributionSignal) {
-        const tp = buildTradeParams(ctx, bias, "AVWAP Rejection", "Daily", "A",
-          [...confirmingFactors, "Price rejected at anchored VWAP from swing high"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
-          [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
-        if (tp) setups.push(tp);
-      }
-
-      // BB Squeeze Breakdown
       if (ctx.bbDaily.squeeze && ctx.bbDaily.touchingLower && ctx.volumeDaily.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "Bollinger Band Squeeze Breakdown", "Daily", "A",
-          [...confirmingFactors, "BB squeeze breakdown with volume"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Bollinger Band Squeeze Breakdown",
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "BB squeeze breakdown with volume"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [ctx.bbDaily.lower[ctx.bbDaily.lower.length - 1] ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // MA Stack Short
-      if (!isNaN(e9) && !isNaN(s50) && !isNaN(s200) &&
-          price < e9 && e9 < s50 && s50 < s200 && price >= s50 * 0.98) {
-        const tp = buildTradeParams(ctx, bias, "MA Stack Short", "Daily", "A",
-          [...confirmingFactors, "Bounce to 50 SMA in downtrend"], riskFactors,
-          price, [s50 * 0.998, s50 * 1.002], stopAboveResistance,
+      if (
+        !isNaN(e9) &&
+        !isNaN(s50) &&
+        !isNaN(s200) &&
+        price < e9 &&
+        e9 < s50 &&
+        s50 < s200 &&
+        price >= s50 * 0.98
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "MA Stack Short",
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "Bounce to 50 SMA in downtrend"],
+          riskFactors,
+          price,
+          [s50 * 0.998, s50 * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // MACD Bearish Cross
-      if (ctx.macdDaily.crossover === "bearish" &&
-          ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] > 40 &&
-          !isNaN(ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1]) &&
-          ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1] > 0) {
-        const tp = buildTradeParams(ctx, bias, "MACD Bearish Cross + RSI > 40", "4H", "B",
-          [...confirmingFactors, "MACD crossover above zero"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+      if (
+        ctx.macdDaily.crossover === "bearish" &&
+        ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] > 40 &&
+        !isNaN(ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1]) &&
+        ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1] > 0
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "MACD Bearish Cross + RSI > 40",
+          "4H",
+          applyGradeMod("B", mtf.gradeModifier),
+          [...confirmingFactors, "MACD crossover above zero"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Short Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // Fibonacci Confluence Short
-      if (ctx.fibDaily.within1Percent && ctx.fibDaily.nearestLevel &&
-          ["50%", "61.8%"].includes(ctx.fibDaily.nearestLevel.level) &&
-          ctx.patternsDaily.some((p) => p.type === "bearish")) {
-        const tp = buildTradeParams(ctx, bias, "Fibonacci Confluence Short", "Daily", "A",
-          [...confirmingFactors, "At key Fib + bearish candle"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+      if (
+        ctx.fibDaily.within1Percent &&
+        ctx.fibDaily.nearestLevel &&
+        ["50%", "61.8%"].includes(ctx.fibDaily.nearestLevel.level) &&
+        ctx.patternsDaily.some((p) => p.type === "bearish")
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Fibonacci Confluence Short",
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, "At key Fib + bearish candle"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // Overbought RSI Reversal
-      if (ctx.rsiDaily.overbought && ctx.rsiDaily.divergence === "bearish" &&
-          ctx.volumeDaily.currentVsAvg >= 1.5) {
-        const tp = buildTradeParams(ctx, bias, "Overbought RSI Reversal", "Daily", "B",
-          [...confirmingFactors, "RSI overbought + divergence + volume"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+      if (
+        ctx.rsiDaily.overbought &&
+        ctx.rsiDaily.divergence === "bearish" &&
+        ctx.volumeDaily.currentVsAvg >= 1.5
+      ) {
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          "Overbought RSI Reversal",
+          "Daily",
+          applyGradeMod("B", mtf.gradeModifier),
+          [...confirmingFactors, "RSI overbought + divergence + volume"],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
+          "Swing"
+        );
         if (tp) setups.push(tp);
       }
 
-      // New: Distribution + AVWAP setup
-      if (ctx.volumeDaily.distributionSignal && priceBelowAvwapShort) {
-        const tp = buildTradeParams(ctx, bias, "Distribution Breakdown", "Daily", "A",
-          [...confirmingFactors, "High-volume distribution below AVWAP"], riskFactors,
-          price, [price * 0.998, price * 1.002], stopAboveResistance,
+      if (
+        ctx.gapAnalysis?.setup &&
+        ctx.gapAnalysis.bias === "SHORT" &&
+        ctx.volumeDaily.currentVsAvg >= 1
+      ) {
+        const gapDesc =
+          ctx.gapAnalysis.gap?.type === "up"
+            ? `Gap up ${(ctx.gapAnalysis.gap.sizePct * 100).toFixed(1)}%`
+            : `Gap down ${(ctx.gapAnalysis.gap!.sizePct * 100).toFixed(1)}%`;
+        const tp = computeTradeParams(
+          ctx,
+          bias,
+          ctx.gapAnalysis.setup,
+          "Daily",
+          applyGradeMod("A", mtf.gradeModifier),
+          [...confirmingFactors, gapDesc],
+          riskFactors,
+          price,
+          [price * 0.998, price * 1.002],
+          stopAboveResistance,
           [support?.price ?? price * 0.95, price * 0.9, price * 0.85],
-          "Swing", atrCurrent);
+          "Short Swing"
+        );
         if (tp) setups.push(tp);
       }
     }
@@ -364,14 +564,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
   return setups;
 }
 
-/**
- * Build a validated trade parameter set.
- *
- * Key change from original: ATR-based stop validation.
- * If the stop doesn't make sense relative to ATR, the setup is rejected
- * rather than surfaced with a dangerously tight or comically wide stop.
- */
-function buildTradeParams(
+function computeTradeParams(
   ctx: IndicatorContext,
   bias: Bias,
   name: string,
@@ -383,34 +576,49 @@ function buildTradeParams(
   entryZone: [number, number],
   stopPrice: number,
   targets: [number, number, number],
-  holdDuration: HoldDuration,
-  atrCurrent: number
+  holdDuration: HoldDuration
 ): (SetupResult & { tradeParams: TradeParameters }) | null {
   const entryMid = (entryZone[0] + entryZone[1]) / 2;
-
-  // ── ATR stop validation ──────────────────────────────────────────────────
-  const stopValidation = validateStopVsATR(entryMid, stopPrice, atrCurrent);
-  if (!stopValidation.valid) {
-    // Don't surface setups with stops that will fail in real trading
-    return null;
-  }
-
+  const riskAmount = Math.abs(entryMid - stopPrice);
   const rr = computeRiskReward(entryMid, stopPrice, targets[0], bias);
+
   if (rr < 1.5) return null;
 
-  const pos = computePositionSizing(
-    ctx.accountSize,
-    ctx.riskPerTrade,
-    entryMid,
-    stopPrice,
-    bias
-  );
+  const useKelly =
+    (ctx.sizingMethod === "half_kelly" || ctx.sizingMethod === "full_kelly") &&
+    ctx.kellyParams &&
+    ctx.kellyParams.closedTrades >= 20;
+
+  const pos = useKelly
+    ? computeKellyPositionSize(
+        ctx.accountSize,
+        ctx.kellyParams!.winRate,
+        ctx.kellyParams!.avgWinPercent,
+        ctx.kellyParams!.avgLossPercent,
+        entryMid,
+        stopPrice,
+        ctx.sizingMethod!
+      )
+    : computePositionSizing(
+        ctx.accountSize,
+        ctx.riskPerTrade,
+        entryMid,
+        stopPrice,
+        bias
+      );
 
   const t1Gain = ((targets[0] - entryMid) / entryMid) * 100;
   const t2Gain = ((targets[1] - entryMid) / entryMid) * 100;
   const t3Gain = ((targets[2] - entryMid) / entryMid) * 100;
 
-  const riskAmount = Math.abs(entryMid - stopPrice);
+  const economicRisk = checkEconomicRisk(holdDuration);
+  const economicRiskFactor =
+    economicRisk.hasNearTermEvent &&
+    economicRisk.riskLevel !== "NONE" &&
+    economicRisk.nextEvent &&
+    economicRisk.daysUntilEvent != null
+      ? `${economicRisk.nextEvent.name} in ${economicRisk.daysUntilEvent} days — volatility risk`
+      : null;
 
   const tradeParams: TradeParameters = {
     entry: {
@@ -427,7 +635,6 @@ function buildTradeParams(
       price: stopPrice,
       type: "Hard Stop",
       riskPercent: (riskAmount / entryMid) * 100,
-      atrMultiple: stopValidation.atrMultiple, // Surface for trader context
     },
     riskReward: {
       toT1: rr,
@@ -440,11 +647,16 @@ function buildTradeParams(
       compositeScore(
         momentumScore(ctx.rsiDaily, ctx.macdDaily, bias),
         trendScore(ctx.daily, ctx.sma50Daily, ctx.sma200Daily, ctx.ema9Daily, bias),
-        volumeScore(ctx.volumeDaily, bias)
+        volumeScore(ctx.volumeDaily, bias),
+        ctx.breadth,
+        bias
       ),
       bias
     ),
+    economicRisk: economicRisk.hasNearTermEvent ? economicRisk : undefined,
   };
+
+  const finalRisk = economicRiskFactor ? [...risk, economicRiskFactor] : risk;
 
   return {
     name,
@@ -452,7 +664,7 @@ function buildTradeParams(
     timeframe,
     grade,
     confirmingFactors: confirming,
-    riskFactors: risk,
+    riskFactors: finalRisk,
     tradeParams,
   };
 }
