@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { OptionsToggle, type OptionsMode } from "@/components/options/OptionsToggle";
 import { Select } from "@/components/ui/select";
 import type { ScreenerFilters } from "@/types";
-import type { SetupGrade } from "@/types";
 import { cn } from "@/lib/utils/cn";
 
 interface FilterPanelProps {
@@ -16,30 +15,16 @@ interface FilterPanelProps {
   onOptionsModeChange?: (v: OptionsMode) => void;
 }
 
-const GRADE_OPTIONS: SetupGrade[] = ["A+", "A", "B", "C"];
 const SECTORS = [
-  "All",
-  "Technology",
-  "Consumer Cyclical",
-  "Consumer Defensive",
-  "Healthcare",
-  "Financial Services",
-  "Industrials",
-  "Energy",
-  "Communication Services",
-  "Real Estate",
-  "Utilities",
-  "Basic Materials",
+  "All", "Technology", "Consumer Cyclical", "Consumer Defensive",
+  "Healthcare", "Financial Services", "Industrials", "Energy",
+  "Communication Services", "Real Estate", "Utilities", "Basic Materials",
 ];
 
 function SegmentedControl<T extends string>({
-  value,
-  options,
-  onChange,
+  value, options, onChange,
 }: {
-  value: T;
-  options: T[];
-  onChange: (v: T) => void;
+  value: T; options: readonly T[]; onChange: (v: T) => void;
 }) {
   return (
     <div className="flex rounded border border-[var(--border-default)] bg-[var(--background-surface)] p-0.5">
@@ -62,12 +47,8 @@ function SegmentedControl<T extends string>({
 }
 
 export function FilterPanel({
-  filters,
-  onFiltersChange,
-  onRun,
-  isLoading,
-  optionsMode = "Stocks",
-  onOptionsModeChange,
+  filters, onFiltersChange, onRun, isLoading,
+  optionsMode = "Stocks", onOptionsModeChange,
 }: FilterPanelProps) {
   const update = (updates: Partial<ScreenerFilters>) => {
     onFiltersChange({ ...filters, ...updates });
@@ -75,10 +56,12 @@ export function FilterPanel({
 
   return (
     <>
+      {/* ── Primary filter bar ─────────────────────────────────────────── */}
       <div className="sticky top-[76px] z-20 flex h-12 flex-wrap items-center gap-4 border-b border-[var(--border-default)] bg-[var(--background-base)] px-4 md:flex-nowrap">
         {onOptionsModeChange && (
           <OptionsToggle value={optionsMode} onChange={onOptionsModeChange} />
         )}
+
         <div className="flex items-center gap-3">
           <span className="font-mono text-xs text-[var(--text-muted)]">Bias</span>
           <SegmentedControl
@@ -102,15 +85,43 @@ export function FilterPanel({
             Min R:R: {filters.minRR.toFixed(1)}x
           </span>
           <input
-            type="range"
-            min={1}
-            max={3}
-            step={0.1}
-            value={filters.minRR}
+            type="range" min={1} max={3} step={0.1} value={filters.minRR}
             onChange={(e) => update({ minRR: parseFloat(e.target.value) })}
             className="h-1.5 w-24 accent-[var(--signal-neutral)]"
           />
         </div>
+
+        {/* ── New: Min RS Rating slider ─────────────────────────────────── */}
+        <div className="flex items-center gap-2">
+          <span
+            className="font-mono text-xs text-[var(--text-muted)]"
+            title="Minimum Relative Strength Rating vs. SPY (0–100). Recommended: 70 for longs."
+          >
+            Min RS: {filters.minRSRating ?? 0}
+          </span>
+          <input
+            type="range" min={0} max={90} step={5}
+            value={filters.minRSRating ?? 0}
+            onChange={(e) => update({ minRSRating: parseInt(e.target.value) })}
+            className="h-1.5 w-20 accent-[var(--signal-neutral)]"
+          />
+        </div>
+
+        {/* ── New: Exclude earnings risk toggle ────────────────────────── */}
+        <label
+          className="flex cursor-pointer items-center gap-1.5"
+          title="Hide tickers with earnings within 14 days"
+        >
+          <input
+            type="checkbox"
+            checked={filters.excludeEarningsRisk ?? false}
+            onChange={(e) => update({ excludeEarningsRisk: e.target.checked })}
+            className="rounded border-[var(--border-default)]"
+          />
+          <span className="font-mono text-xs text-[var(--text-secondary)]">
+            No earnings risk
+          </span>
+        </label>
 
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -119,9 +130,7 @@ export function FilterPanel({
             onChange={(e) => update({ includeBearishSetups: e.target.checked })}
             className="rounded border-[var(--border-default)]"
           />
-          <span className="font-mono text-xs text-[var(--text-secondary)]">
-            Short setups
-          </span>
+          <span className="font-mono text-xs text-[var(--text-secondary)]">Shorts</span>
         </label>
 
         <Select
@@ -138,8 +147,7 @@ export function FilterPanel({
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs text-[var(--text-muted)]">$</span>
             <Input
-              type="number"
-              value={filters.accountSize}
+              type="number" value={filters.accountSize}
               onChange={(e) => update({ accountSize: parseInt(e.target.value) || 25000 })}
               className="h-8 w-24 font-mono text-xs tabular-nums"
             />
@@ -147,16 +155,14 @@ export function FilterPanel({
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs text-[var(--text-muted)]">Risk</span>
             <Input
-              type="number"
-              value={(filters.riskPerTrade * 100).toFixed(1)}
+              type="number" value={(filters.riskPerTrade * 100).toFixed(1)}
               onChange={(e) => update({ riskPerTrade: (parseFloat(e.target.value) || 1) / 100 })}
               className="h-8 w-14 font-mono text-xs tabular-nums"
             />
             <span className="font-mono text-xs text-[var(--text-muted)]">%</span>
           </div>
           <button
-            onClick={onRun}
-            disabled={isLoading}
+            onClick={onRun} disabled={isLoading}
             className="flex h-9 w-[140px] items-center justify-center rounded bg-[var(--signal-neutral)] font-mono text-xs font-medium text-white transition-all hover:brightness-110 hover:scale-[1.02] disabled:opacity-70 disabled:hover:scale-100"
           >
             {isLoading ? (
@@ -167,9 +173,7 @@ export function FilterPanel({
                 </svg>
                 Scanning...
               </span>
-            ) : (
-              "Run Screen"
-            )}
+            ) : "Run Screen"}
           </button>
         </div>
       </div>
