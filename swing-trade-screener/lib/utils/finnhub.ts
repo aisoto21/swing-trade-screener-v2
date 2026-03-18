@@ -96,6 +96,56 @@ export async function getRecommendations(ticker: string): Promise<FinnhubRecomme
   return Array.isArray(data) ? data : null;
 }
 
+export interface FinnhubPriceTarget {
+  targetHigh: number;
+  targetLow: number;
+  targetMean: number;
+  targetMedian: number;
+}
+
+/**
+ * Get analyst price targets for a ticker
+ * Finnhub may return lastUpdated, symbol, targetHigh, targetLow, targetMean, targetMedian
+ */
+export async function getPriceTarget(ticker: string): Promise<FinnhubPriceTarget | null> {
+  const data = await fetchFinnhub<Record<string, unknown>>(
+    `/stock/price-target?symbol=${encodeURIComponent(ticker)}`
+  );
+  if (!data) return null;
+  const targetMean = Number(data.targetMean ?? data.target_mean ?? 0);
+  const targetHigh = Number(data.targetHigh ?? data.target_high ?? 0);
+  const targetLow = Number(data.targetLow ?? data.target_low ?? 0);
+  const targetMedian = Number(data.targetMedian ?? data.target_median ?? 0);
+  if (!targetMean && !targetHigh && !targetLow) return null;
+  return { targetHigh, targetLow, targetMean, targetMedian };
+}
+
+export interface FinnhubNewsItem {
+  category: string;
+  datetime: number;
+  headline: string;
+  id: number;
+  related: string;
+  source: string;
+  summary: string;
+  url: string;
+}
+
+/**
+ * Get company news for a ticker
+ */
+export async function getCompanyNews(
+  ticker: string,
+  daysBack: number = 2
+): Promise<FinnhubNewsItem[] | null> {
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10);
+  const data = await fetchFinnhub<FinnhubNewsItem[]>(
+    `/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}`
+  );
+  return Array.isArray(data) ? data : null;
+}
+
 /**
  * Get earnings calendar for a ticker
  */
