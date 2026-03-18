@@ -3,13 +3,13 @@
 import { useState, useCallback, useEffect } from "react";
 import { FilterPanel } from "@/components/screener/FilterPanel";
 import { ResultsTable } from "@/components/screener/ResultsTable";
-import { TradeOfTheDay } from "@/components/screener/TradeOfTheDay";
+import { TradeOfTheDay, getTradeOfTheDay } from "@/components/screener/TradeOfTheDay";
 import { ScanProgress } from "@/components/screener/ScanProgress";
 import { ScoringMethodologyModal } from "@/components/screener/ScoringMethodologyModal";
 import { useFeature } from "@/lib/hooks/useFeature";
 import type { ScreenerResult, ScreenerFilters, ContractRecommendation } from "@/types";
 import { SCREENING_UNIVERSE } from "@/constants/universe";
-import { useRegimeStore } from "@/lib/stores/regimeStore"
+import { useRegimeStore } from "@/lib/stores/regimeStore";
 import { useSettingsStore } from "@/lib/stores/settingsStore";
 
 const DEFAULT_FILTERS: ScreenerFilters = {
@@ -22,23 +22,10 @@ const DEFAULT_FILTERS: ScreenerFilters = {
   accountSize: 25000,
   riskPerTrade: 0.01,
   includeBearishSetups: true,
+  // New defaults — conservative: no RS filter out of the box
+  minRSRating: 0,
+  excludeEarningsRisk: false,
 };
-
-function getTradeOfTheDay(results: ScreenerResult[]): ScreenerResult | null {
-  const valid = results.filter(
-    (r) => r?.primarySetup?.tradeParams?.riskReward?.toT1 != null
-  );
-  if (valid.length === 0) return null;
-  const aPlus = valid.filter((r) => r.primarySetup?.grade === "A+");
-  const toSort = aPlus.length > 0 ? aPlus : valid;
-  return toSort.sort(
-    (a, b) =>
-      ((b.primarySetup?.confirmingFactors?.length ?? 0) +
-        (b.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0)) -
-      ((a.primarySetup?.confirmingFactors?.length ?? 0) +
-        (a.primarySetup?.tradeParams?.riskReward?.toT1 ?? 0))
-  )[0];
-}
 
 export default function ScreenerPage() {
   const [filters, setFilters] = useState<ScreenerFilters>(DEFAULT_FILTERS);
@@ -97,17 +84,11 @@ export default function ScreenerPage() {
     })();
     return () => { cancelled = true; };
   }, [
-    optionsLayer,
-    optionsMode,
-    results,
-    filters.accountSize,
-    filters.riskPerTrade,
-    settings.optionsMinIVP,
-    settings.optionsMinOI,
-    settings.optionsDTEMultiplier,
-    settings.optionsAllowNaked,
-    settings.optionsAllowSpreads,
-    settings.optionsAllowPMCC,
+    optionsLayer, optionsMode, results,
+    filters.accountSize, filters.riskPerTrade,
+    settings.optionsMinIVP, settings.optionsMinOI,
+    settings.optionsDTEMultiplier, settings.optionsAllowNaked,
+    settings.optionsAllowSpreads, settings.optionsAllowPMCC,
   ]);
 
   const runScreener = useCallback(async () => {
@@ -145,10 +126,16 @@ export default function ScreenerPage() {
               else if (msg.type === "progress") setProgress(msg.data);
               else if (msg.type === "result") {
                 setResults((r) => [...r, msg.data]);
-              }               else if (msg.type === "done") {
+              } else if (msg.type === "done") {
                 const now = new Date();
                 setLastScan(now);
-                setLastUpdated(now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) + " EST");
+                setLastUpdated(
+                  now.toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZone: "America/New_York",
+                  }) + " EST"
+                );
               } else if (msg.type === "error") throw new Error(msg.data?.message);
             } catch {
               // skip parse errors
@@ -169,22 +156,11 @@ export default function ScreenerPage() {
   const exportCSV = useCallback(() => {
     if (results.length === 0) return;
     const headers = [
-      "Ticker",
-      "Company",
-      "Price",
-      "Change%",
-      "Setup",
-      "Grade",
-      "Bias",
-      "Entry Low",
-      "Entry High",
-      "Stop",
-      "T1",
-      "T2",
-      "T3",
-      "R:R",
-      "Hold",
-      "Rating",
+      "Ticker", "Company", "Price", "Change%", "Setup", "Grade", "Bias",
+      "RS Rating", "RS Classification", "Earnings Days", "Earnings Risk",
+      "ATR %", "Stop ATR Multiple",
+      "Entry Low", "Entry High", "Stop", "T1", "T2", "T3",
+      "R:R", "Hold", "Rating",
     ];
     const rows = results.map((r) => [
       r.ticker,
@@ -194,6 +170,12 @@ export default function ScreenerPage() {
       r.primarySetup.name,
       r.primarySetup.grade,
       r.primarySetup.bias,
+      r.rsAnalysis?.rating?.toFixed(1) ?? "",
+      r.rsAnalysis?.classification ?? "",
+      r.earningsData?.daysToEarnings ?? "",
+      r.earningsData?.riskLevel ?? "",
+      r.atrData?.atrPercent?.toFixed(2) ?? "",
+      r.primarySetup.tradeParams.stop.atrMultiple?.toFixed(2) ?? "",
       r.primarySetup.tradeParams.entry.zone[0],
       r.primarySetup.tradeParams.entry.zone[1],
       r.primarySetup.tradeParams.stop.price,
@@ -214,11 +196,11 @@ export default function ScreenerPage() {
     URL.revokeObjectURL(url);
   }, [results]);
 
+  // Improved TOTD — uses weighted composite score (see TradeOfTheDay.tsx)
   const tradeOfTheDay = getTradeOfTheDay(results);
 
   return (
     <div className="min-h-screen bg-[var(--background-base)]">
-
       <div className="p-4">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="font-mono text-xl font-semibold text-[var(--text-primary)]">
@@ -232,7 +214,11 @@ export default function ScreenerPage() {
           </button>
         </div>
 
-        <TradeOfTheDay result={tradeOfTheDay} accountSize={filters.accountSize} riskPerTrade={filters.riskPerTrade} />
+        <TradeOfTheDay
+          result={tradeOfTheDay}
+          accountSize={filters.accountSize}
+          riskPerTrade={filters.riskPerTrade}
+        />
 
         {isLoading && (
           <ScanProgress
