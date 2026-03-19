@@ -30,7 +30,7 @@ const DEFAULT_FILTERS: ScreenerFilters = {
 export default function ScreenerPage() {
   const [filters, setFilters] = useState<ScreenerFilters>(DEFAULT_FILTERS);
   const [results, setResults] = useState<ScreenerResult[]>([]);
-  const { setRegime, setLastUpdated } = useRegimeStore();
+  const { setRegime, setBreadth, setLastUpdated } = useRegimeStore();
   const settings = useSettingsStore();
   const [isLoading, setIsLoading] = useState(false);
   const [lastScan, setLastScan] = useState<Date | null>(null);
@@ -96,6 +96,7 @@ export default function ScreenerPage() {
     setResults([]);
     setFailedCount(0);
     setRegime(null);
+    setBreadth(null);
 
     try {
       const res = await fetch("/api/screen", {
@@ -123,6 +124,7 @@ export default function ScreenerPage() {
             try {
               const msg = JSON.parse(line);
               if (msg.type === "regime") setRegime(msg.data);
+              else if (msg.type === "breadth") setBreadth(msg.data);
               else if (msg.type === "progress") setProgress(msg.data);
               else if (msg.type === "result") {
                 const screenResult = msg.data?.result ?? msg.data;
@@ -154,7 +156,7 @@ export default function ScreenerPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [filters]);
+  }, [filters, setRegime, setBreadth, setLastUpdated]);
 
   const exportCSV = useCallback(() => {
     if (results.length === 0) return;
