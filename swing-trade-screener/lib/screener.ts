@@ -30,6 +30,8 @@ import {
   computeSectorRanks,
   getSectorRSForTicker,
 } from "@/lib/indicators/sectorRelativeStrength";
+
+export { computeSectorRanks };
 import { classifySetups } from "@/lib/scoring/tradeSetupClassifier";
 import { detectMarketRegime } from "@/lib/utils/marketRegime";
 import { getRecommendations, getPriceTarget, getCompanyNews, getEarningsCalendar } from "@/lib/utils/finnhub";
@@ -158,6 +160,10 @@ export async function screenTicker(
   const ema9_15M = ema9(fifteenMin);
   const sma50_4H = sma50(fourHour.length >= 50 ? fourHour : daily);
   const gapResult = gapAnalysis(daily);
+
+  const sectorRS = sectorRanks
+    ? getSectorRSForTicker(stock.sector, sectorRanks)
+    : undefined;
 
   const setups = classifySetups({
     daily: toOHLCV(daily),
