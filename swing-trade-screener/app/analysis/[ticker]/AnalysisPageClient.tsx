@@ -110,15 +110,24 @@ export default function AnalysisPage({
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--background-base)]">
-        <p className="font-mono text-sm text-[var(--text-muted)]">Loading analysis...</p>
+        <div className="flex flex-col items-center gap-3">
+          <svg className="h-5 w-5 animate-spin text-[var(--signal-neutral)]" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <p className="font-mono text-sm text-[var(--text-muted)]">Analyzing {ticker}...</p>
+        </div>
       </div>
     );
   }
 
-  if (error || !data) {
+  if (error || !data || !data.primarySetup) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--background-base)]">
-        <p className="font-mono text-sm text-[var(--signal-short)]">Failed to load analysis</p>
+        <p className="font-mono text-sm text-[var(--signal-short)]">
+          {error ? "Failed to load analysis — API may be rate limited" : `No setup found for ${ticker}`}
+        </p>
+        <p className="font-mono text-xs text-[var(--text-muted)]">Try again during market hours</p>
         <Link href="/screener" className="font-mono text-sm text-[var(--signal-neutral)] hover:underline">
           ← Back to Screener
         </Link>
