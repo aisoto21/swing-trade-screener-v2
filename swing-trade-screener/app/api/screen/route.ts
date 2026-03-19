@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import type { ScreenerFilters } from "@/types";
-import { screenTicker, getMarketRegime } from "@/lib/screener";
+import { screenTicker, getMarketRegime, computeSectorRanks } from "@/lib/screener";
 import { computeMarketBreadthFromAggregates } from "@/lib/utils/marketBreadth";
 import type { BreadthDataPoint } from "@/lib/utils/marketBreadth";
 import { SCREENING_UNIVERSE } from "@/constants/universe";
@@ -38,10 +38,12 @@ export async function POST(req: NextRequest) {
 
           const breadthPoints: BreadthDataPoint[] = [];
 
+          const sectorRanks = await computeSectorRanks(useMock);
+
           for (let i = 0; i < tickers.length; i += batchSize) {
             const batch = tickers.slice(i, i + batchSize);
             const results = await Promise.allSettled(
-              batch.map((t) => screenTicker(t, filters, useMock))
+              batch.map((t) => screenTicker(t, filters, useMock, sectorRanks))
             );
             const processed = Math.min(i + batch.length, tickers.length);
             controller.enqueue(
