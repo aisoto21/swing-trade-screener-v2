@@ -5,7 +5,7 @@ import { MarketRegimeBanner } from "./MarketRegimeBanner";
 import { useRegimeStore } from "@/lib/stores/regimeStore";
 
 export function RegimeProvider() {
-  const { regime, lastUpdated, setRegime } = useRegimeStore();
+  const { regime, breadth, lastUpdated, setRegime } = useRegimeStore();
 
   useEffect(() => {
     if (!regime) {
@@ -18,5 +18,5 @@ export function RegimeProvider() {
     }
   }, [regime, setRegime]);
 
-  return <MarketRegimeBanner regime={regime} lastUpdated={lastUpdated} />;
+  return <MarketRegimeBanner regime={regime} breadth={breadth} lastUpdated={lastUpdated} />;
 }
