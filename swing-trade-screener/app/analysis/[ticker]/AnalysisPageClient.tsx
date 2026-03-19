@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MultiTimeframePanel } from "@/components/charts/MultiTimeframePanel";
 import { SetupBadge } from "@/components/screener/SetupBadge";
@@ -56,11 +56,10 @@ async function fetchOptionsRecommendation(
 }
 
 export default function AnalysisPage({
-  params,
+  ticker,
 }: {
-  params: Promise<{ ticker: string }>;
+  ticker: string;
 }) {
-  const { ticker } = use(params);
   const optionsLayer = useFeature("OPTIONS_LAYER");
   const wallStreetFeature = useFeature("WALL_STREET_CONSENSUS");
   const settings = useSettingsStore();
