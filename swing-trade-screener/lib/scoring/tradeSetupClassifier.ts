@@ -184,7 +184,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Golden Cross",
-          "Daily",
+          "1D",
           applyGradeMod("A+", mtf.gradeModifier),
           [...confirmingFactors, "50 SMA crossed above 200 SMA"],
           riskFactors,
@@ -238,7 +238,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Bollinger Band Squeeze Breakout",
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, "BB squeeze breakout with volume"],
           riskFactors,
@@ -264,7 +264,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "MA Stack Pullback",
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, "Pullback to 50 SMA in uptrend"],
           riskFactors,
@@ -310,7 +310,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Fibonacci Confluence Buy",
-          "Daily",
+          "1D",
           "A",
           [...confirmingFactors, "At key Fib + bullish candle"],
           riskFactors,
@@ -332,7 +332,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Oversold RSI Reversal",
-          "Daily",
+          "1D",
           applyGradeMod("B", mtf.gradeModifier),
           [...confirmingFactors, "RSI oversold + divergence + volume"],
           riskFactors,
@@ -358,7 +358,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           ctx.gapAnalysis.setup,
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, gapDesc],
           riskFactors,
@@ -376,7 +376,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Death Cross",
-          "Daily",
+          "1D",
           applyGradeMod("A+", mtf.gradeModifier),
           [...confirmingFactors, "50 SMA crossed below 200 SMA"],
           riskFactors,
@@ -389,7 +389,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
         if (tp) setups.push(tp);
       }
 
-      if (!isNaN(e9_4H) && Math.abs(price - e9_4H) / price < 0.02 && ctx.volume4H.currentVsAvg > 1) {
+      if (!isNaN(e9_4H) && Math.abs(price - e9_4H) / price < 0.02) {
         const tp = computeTradeParams(
           ctx,
           bias,
@@ -407,7 +407,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
         if (tp) setups.push(tp);
       }
 
-      if (!ctx.vwap4H.priceAbove && ctx.volume4H.currentVsAvg >= 1.5) {
+      if (!ctx.vwap4H.priceAbove && ctx.volume4H.currentVsAvg >= 1.0) {
         const tp = computeTradeParams(
           ctx,
           bias,
@@ -430,7 +430,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Bollinger Band Squeeze Breakdown",
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, "BB squeeze breakdown with volume"],
           riskFactors,
@@ -450,13 +450,13 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
         price < e9 &&
         e9 < s50 &&
         s50 < s200 &&
-        price >= s50 * 0.98
+        price >= s50 * 0.92
       ) {
         const tp = computeTradeParams(
           ctx,
           bias,
           "MA Stack Short",
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, "Bounce to 50 SMA in downtrend"],
           riskFactors,
@@ -471,7 +471,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
 
       if (
         ctx.macdDaily.crossover === "bearish" &&
-        ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] > 40 &&
+        ctx.rsiDaily.values[ctx.rsiDaily.values.length - 1] > 30 &&
         !isNaN(ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1]) &&
         ctx.macdDaily.macdLine[ctx.macdDaily.macdLine.length - 1] > 0
       ) {
@@ -502,7 +502,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Fibonacci Confluence Short",
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, "At key Fib + bearish candle"],
           riskFactors,
@@ -524,7 +524,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           "Overbought RSI Reversal",
-          "Daily",
+          "1D",
           applyGradeMod("B", mtf.gradeModifier),
           [...confirmingFactors, "RSI overbought + divergence + volume"],
           riskFactors,
@@ -550,7 +550,7 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
           ctx,
           bias,
           ctx.gapAnalysis.setup,
-          "Daily",
+          "1D",
           applyGradeMod("A", mtf.gradeModifier),
           [...confirmingFactors, gapDesc],
           riskFactors,
