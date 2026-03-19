@@ -125,7 +125,10 @@ export default function ScreenerPage() {
               if (msg.type === "regime") setRegime(msg.data);
               else if (msg.type === "progress") setProgress(msg.data);
               else if (msg.type === "result") {
-                setResults((r) => [...r, msg.data]);
+                const screenResult = msg.data?.result ?? msg.data;
+                if (screenResult?.primarySetup) {
+                  setResults((r) => [...r, screenResult]);
+                }
               } else if (msg.type === "done") {
                 const now = new Date();
                 setLastScan(now);
