@@ -38,6 +38,9 @@ import { computeBreadthDataPoint, type BreadthDataPoint } from "@/lib/utils/mark
 import { getShortInterest } from "@/lib/utils/shortInterest";
 import { computeRelativeStrength } from "@/lib/indicators/relativeStrength";
 import { getPreMarketContext } from "@/lib/utils/marketHours";
+import { currentATR, atrPercent } from "@/lib/indicators/atr";
+import { getEarningsCalendar } from "@/lib/utils/finnhub";
+import type { ATRData, EarningsData } from "@/types";
 import { FEATURES } from "@/config/features";
 
 function toOHLCV(bars: OHLCVBar[]): OHLCVBar[] {
@@ -210,6 +213,46 @@ export async function screenTicker(
   const primary = filtered[0];
   const volAnalysis = volumeAnalysis(daily);
 
+  // Compute ATR data
+  const atrData: ATRData = {
+    current: currentATR(daily),
+    atrPercent: atrPercent(daily),
+  };
+
+  // Compute earnings data
+  let earningsData: EarningsData = { daysToEarnings: 999, riskLevel: "UNKNOWN" };
+  try {
+    const earningsCalendar = await getEarningsCalendar(ticker);
+    if (earningsCalendar && earningsCalendar.length > 0) {
+      const today = new Date();
+      const upcoming = earningsCalendar
+        .map((e) => ({ ...e, date: new Date(e.period) }))
+        .filter((e) => e.date >= today)
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+      if (upcoming.length > 0) {
+        const next = upcoming[0];
+        const daysAway = Math.ceil((next.date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        earningsData = {
+          daysToEarnings: daysAway,
+          nextEarningsDate: next.period,
+          riskLevel: daysAway <= 3 ? "HIGH" : daysAway <= 21 ? "MODERATE" : "LOW",
+        };
+      } else {
+        earningsData = { daysToEarnings: 999, riskLevel: "LOW" };
+      }
+    }
+  } catch { /* earnings data is best-effort */ }
+
+  // Server-side RS filter
+  if (filters.minRSRating && filters.minRSRating > 0 && rsAnalysis) {
+    if (rsAnalysis.rating < filters.minRSRating) return { result: null, breadthData };
+  }
+
+  // Server-side earnings exclusion
+  if (filters.excludeEarningsRisk && earningsData.riskLevel === "HIGH") {
+    return { result: null, breadthData };
+  }
+
   const shortInterestPromise = FEATURES.SHORT_INTEREST ? getShortInterest(ticker) : Promise.resolve(undefined);
   const preMarketPromise = FEATURES.PREMARKET_CONTEXT ? getPreMarketContext(ticker) : Promise.resolve(null);
   const wsPromise = FEATURES.WALL_STREET_CONSENSUS
@@ -306,6 +349,8 @@ export async function screenTicker(
       newsSentiment,
       shortInterest,
       rsAnalysis,
+      atr: atrData,
+      earnings: earningsData,
       preMarketContext: preMarketContext ?? undefined,
       timestamp: new Date().toISOString(),
     },
