@@ -5,7 +5,7 @@ import type { RSAnalysis } from "@/types";
 import { cn } from "@/lib/utils/cn";
 
 interface RSBadgeProps {
-  rs: RSAnalysis;
+  rs: RSAnalysis | null | undefined;
   className?: string;
 }
 
@@ -38,6 +38,7 @@ const CLASSIFICATION_STYLES: Record<RSAnalysis["classification"], { color: strin
 };
 
 export const RSBadge = memo(function RSBadge({ rs, className }: RSBadgeProps) {
+  if (!rs) return <span className="font-mono text-xs text-[var(--text-muted)]">—</span>;
   const style = CLASSIFICATION_STYLES[rs.classification];
 
   return (
