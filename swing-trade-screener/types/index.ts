@@ -84,6 +84,17 @@ export interface VolumeAnalysis {
   obvSlope: "up" | "down" | "neutral";
 }
 
+export interface ATRData {
+  current: number;      // Raw ATR value in dollars
+  atrPercent: number;   // ATR as % of price
+}
+
+export interface EarningsData {
+  daysToEarnings: number;
+  nextEarningsDate?: string;
+  riskLevel: "HIGH" | "MODERATE" | "LOW" | "UNKNOWN";
+}
+
 export interface GapInfo {
   type: "up" | "down";
   sizePct: number;
@@ -117,6 +128,8 @@ export interface NewsSentiment {
   hasHighImpactNews: boolean;
   riskFlag: boolean;
 }
+
+export type { RSAnalysis } from "@/lib/indicators/relativeStrength";
 
 // =============================================================================
 // SETUP & TRADE TYPES
@@ -245,6 +258,8 @@ export interface ScreenerFilters {
   excludeADRs?: boolean;
   sector?: string;
   includeBearishSetups?: boolean;
+  minRSRating?: number;
+  excludeEarningsRisk?: boolean;
 }
 
 export interface WallStreetConsensus {
@@ -288,7 +303,9 @@ export interface ScreenerResult {
   sectorRS?: SectorRSResult;
   newsSentiment?: NewsSentiment;
   shortInterest?: ShortInterestData;
-  rsAnalysis?: import("@/lib/indicators/relativeStrength").RSAnalysis;
+  rsAnalysis?: RSAnalysis;
+  atr?: ATRData;
+  earnings?: EarningsData;
   preMarketContext?: import("@/lib/utils/marketHours").PreMarketContext;
   timestamp: string;
 }
