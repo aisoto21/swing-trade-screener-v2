@@ -257,6 +257,9 @@ export default function ScreenerPage() {
           optionsRecommendations={optionsRecommendations}
           accountSize={filters.accountSize}
           riskPerTrade={filters.riskPerTrade}
+          regime={regime?.regime ?? null}
+          onRelaxGrade={() => setFilters((f) => ({ ...f, minSetupGrade: "C" }))}
+          onLowerRR={() => setFilters((f) => ({ ...f, minRR: 1.0 }))}
         />
       </div>
 
