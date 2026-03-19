@@ -114,7 +114,11 @@ export function classifySetups(ctx: IndicatorContext): Array<SetupResult & { tra
       }
     );
 
-    if (mtf.alignedCount === 0) continue;
+    // In bear markets LONG setups will naturally score 0/3 MTF (price below 50SMA,
+    // RSI < 50, MACD negative). Allow longs through if they have at least 1 alignment.
+    // For shorts, a weak tape often means 4H volume isn't elevated — allow 0/3 shorts
+    // through so bear market short setups aren't completely suppressed.
+    if (mtf.alignedCount === 0 && bias === "LONG") continue;
 
     const sectorMod = ctx.sectorRS
       ? ctx.sectorRS.sectorRank <= 2
