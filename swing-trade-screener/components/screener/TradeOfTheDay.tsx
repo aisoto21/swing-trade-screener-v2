@@ -41,7 +41,7 @@ export function getTradeOfTheDay(results: ScreenerResult[]): ScreenerResult | nu
   return scored[0].result;
 }
 
-
+export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
   const wallStreetFeature = useFeature("WALL_STREET_CONSENSUS");
   if (!result?.primarySetup?.tradeParams) return null;
 
