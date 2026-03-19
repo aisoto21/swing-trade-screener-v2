@@ -166,13 +166,15 @@ export function PortfolioPageClient() {
     return openTrades.filter((t) => t.strategy === strategyFilter);
   }, [openTrades, strategyFilter]);
 
-  const metrics = computePerformanceMetrics(filteredTrades);
-  const portfolioMetrics = computePortfolioMetrics(
-    filteredOpenTrades,
-    currentPrices,
-    accountSize
-  );
-  const allAlerts = [...portfolioMetrics.alerts, ...correlationAlerts];
+  const metrics = computePerformanceMetrics(filteredTrades ?? []);
+  const portfolioMetrics = (() => {
+    try {
+      return computePortfolioMetrics(filteredOpenTrades, currentPrices, accountSize);
+    } catch {
+      return { alerts: [], totalValue: 0, totalPnL: 0, totalPnLPercent: 0 };
+    }
+  })();
+  const allAlerts = [...(portfolioMetrics.alerts ?? []), ...correlationAlerts];
 
   function formatDaysHeld(entryDate: string): string {
     const days = Math.floor(
