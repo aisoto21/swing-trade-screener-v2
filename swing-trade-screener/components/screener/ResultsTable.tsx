@@ -395,7 +395,7 @@ export function ResultsTable({
                   {columnVisibility.rs && (
                     <td className="w-[64px] px-3 py-2">
                       {r.rsAnalysis ? (
-                        <RSBadge rating={r.rsAnalysis.rating} />
+                        <RSBadge rs={r.rsAnalysis} />
                       ) : (
                         <span className="font-mono text-xs text-[var(--text-muted)]">—</span>
                       )}
