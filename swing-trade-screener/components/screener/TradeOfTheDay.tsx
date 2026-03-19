@@ -12,7 +12,36 @@ interface TradeOfTheDayProps {
   result: ScreenerResult | null;
 }
 
-export function TradeOfTheDay({ result }: TradeOfTheDayProps) {
+export function getTradeOfTheDay(results: ScreenerResult[]): ScreenerResult | null {
+  if (!results.length) return null;
+
+  const scored = results
+    .filter((r) => r.primarySetup?.tradeParams)
+    .map((r) => {
+      const setup = r.primarySetup;
+      const t = setup.tradeParams;
+      const gradeScore = { "A+": 4, A: 3, B: 2, C: 1 }[setup.grade] ?? 0;
+      const rsScore = r.rsAnalysis?.rating ?? 50;
+      const rrScore = t.riskReward?.toT1 ?? 0;
+      const signalScore = setup.confirmingFactors?.length ?? 0;
+      const earningsPenalty = r.earnings?.riskLevel === "HIGH" ? -25 : 0;
+
+      const total =
+        gradeScore * 10 +   // 40 pts max (grade)
+        rsScore * 0.3 +     // 30 pts max (RS 0-100)
+        rrScore * 5 +       // 20 pts max (R:R)
+        signalScore * 2 +   // 10 pts (signals)
+        earningsPenalty;
+
+      return { result: r, score: total };
+    });
+
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].result;
+}
+
+
   const wallStreetFeature = useFeature("WALL_STREET_CONSENSUS");
   if (!result?.primarySetup?.tradeParams) return null;
 
