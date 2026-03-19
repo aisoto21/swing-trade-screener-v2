@@ -221,8 +221,6 @@ export default function ScreenerPage() {
 
         <TradeOfTheDay
           result={tradeOfTheDay}
-          accountSize={filters.accountSize}
-          riskPerTrade={filters.riskPerTrade}
         />
 
         {isLoading && (
@@ -255,8 +253,6 @@ export default function ScreenerPage() {
           isLoading={isLoading}
           optionsMode={optionsMode}
           optionsRecommendations={optionsRecommendations}
-          accountSize={filters.accountSize}
-          riskPerTrade={filters.riskPerTrade}
           regime={regime?.regime ?? null}
           onRelaxGrade={() => setFilters((f) => ({ ...f, minSetupGrade: "C" }))}
           onLowerRR={() => setFilters((f) => ({ ...f, minRR: 1.0 }))}
