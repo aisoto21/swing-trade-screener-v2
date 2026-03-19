@@ -65,7 +65,11 @@ export default function AnalysisPage({
   const wallStreetFeature = useFeature("WALL_STREET_CONSENSUS");
   const settings = useSettingsStore();
   const trades = useTradeLogStore((s) => s.trades);
-  const perf = computePerformanceMetrics(trades);
+  const addTrade = useTradeLogStore((s) => s.addTrade);
+  const openTrades = useTradeLogStore((s) => s.getOpenTrades());
+  const [logTradeModalOpen, setLogTradeModalOpen] = useState(false);
+
+  const perf = computePerformanceMetrics(trades ?? []);
   const metrics = {
     closedTrades: perf.totalTrades,
     winRate: perf.winRate,
@@ -100,12 +104,6 @@ export default function AnalysisPage({
       fetchOptionsRecommendation(ticker, data?.primarySetup, {
         accountSize: settings.accountSize,
         riskPerTrade: settings.riskPerTrade,
-        optionsMinIVP: settings.optionsMinIVP,
-        optionsMinOI: settings.optionsMinOI,
-        optionsDTEMultiplier: settings.optionsDTEMultiplier,
-        optionsAllowNaked: settings.optionsAllowNaked,
-        optionsAllowSpreads: settings.optionsAllowSpreads,
-        optionsAllowPMCC: settings.optionsAllowPMCC,
       }),
     enabled: !!optionsLayer && !!data?.primarySetup,
   });
@@ -130,12 +128,19 @@ export default function AnalysisPage({
   }
 
   const { primarySetup } = data;
-  const t = primarySetup.tradeParams;
+  const t = primarySetup?.tradeParams;
+  if (!t) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[var(--background-base)]">
+        <p className="font-mono text-sm text-[var(--signal-short)]">No setup found for {ticker}</p>
+        <Link href="/screener" className="font-mono text-sm text-[var(--signal-neutral)] hover:underline">
+          ← Back to Screener
+        </Link>
+      </div>
+    );
+  }
   const isLong = primarySetup.bias === "LONG";
-  const addTrade = useTradeLogStore((s) => s.addTrade);
-  const openTrades = useTradeLogStore((s) => s.getOpenTrades());
   const alreadyLogged = openTrades.some((tr) => tr.ticker === ticker);
-  const [logTradeModalOpen, setLogTradeModalOpen] = useState(false);
 
   const priceRange = t.targets.t3.price - t.stop.price;
   const stopPct = 0;
