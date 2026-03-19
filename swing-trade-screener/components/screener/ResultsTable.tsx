@@ -28,6 +28,9 @@ interface ResultsTableProps {
   isLoading?: boolean;
   optionsMode?: "Stocks" | "Options" | "Both";
   optionsRecommendations?: Record<string, ContractRecommendation | null>;
+  regime?: string | null;
+  onRelaxGrade?: () => void;
+  onLowerRR?: () => void;
 }
 
 type SortKey = "ticker" | "price" | "grade" | "rs" | "rr" | "entry" | "stop" | "hold";
@@ -39,6 +42,9 @@ export function ResultsTable({
   isLoading,
   optionsMode = "Stocks",
   optionsRecommendations = {},
+  regime,
+  onRelaxGrade,
+  onLowerRR,
 }: ResultsTableProps) {
   const optionsLayer = useFeature("OPTIONS_LAYER");
   const preMarketFeature = useFeature("PREMARKET_CONTEXT");
@@ -286,23 +292,53 @@ export function ResultsTable({
             {sorted.length === 0 && !isLoading ? (
               <tr>
                 <td colSpan={14 + (showOptionsCols ? 5 : 0)} className="py-16 text-center">
-                  <p className="font-mono text-sm text-[var(--text-muted)]">
-                    No setups match your filters
-                  </p>
-                  <div className="mt-4 flex justify-center gap-2">
-                    <button
-                      onClick={() => {}}
-                      className="rounded border border-[var(--border-default)] px-3 py-1 font-mono text-xs text-[var(--text-secondary)] hover:bg-[var(--background-subtle)]"
-                    >
-                      Relax grade filter
-                    </button>
-                    <button
-                      onClick={() => {}}
-                      className="rounded border border-[var(--border-default)] px-3 py-1 font-mono text-xs text-[var(--text-secondary)] hover:bg-[var(--background-subtle)]"
-                    >
-                      Lower min R:R
-                    </button>
-                  </div>
+                  {(() => {
+                    const isBear = regime === "Bear Market" || regime === "Distribution";
+                    const isChoppy = regime === "Choppy/Sideways";
+                    const isBull = regime === "Bull Market" || regime === "Accumulation";
+                    return (
+                      <div className="mx-auto max-w-sm space-y-3">
+                        <p className="font-mono text-sm text-[var(--text-muted)]">
+                          {isBear
+                            ? "Bear market active — only high-conviction SHORT setups surface"
+                            : isChoppy
+                            ? "Choppy conditions — setups are scarce by design"
+                            : isBull
+                            ? "No setups found — try relaxing grade or R:R filters"
+                            : "No setups match your filters"}
+                        </p>
+                        {isBear && (
+                          <p className="font-mono text-xs text-[var(--text-muted)] opacity-70">
+                            Switch bias to SHORT, or lower the grade filter to see bear market setups
+                          </p>
+                        )}
+                        {isChoppy && (
+                          <p className="font-mono text-xs text-[var(--text-muted)] opacity-70">
+                            Choppy tape reduces valid setups — lower R:R minimum or grade filter
+                          </p>
+                        )}
+                        <div className="flex justify-center gap-2 pt-2">
+                          <button
+                            onClick={onRelaxGrade}
+                            className="rounded border border-[var(--border-default)] px-3 py-1 font-mono text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--background-subtle)] hover:text-[var(--text-primary)]"
+                          >
+                            Relax grade filter
+                          </button>
+                          <button
+                            onClick={onLowerRR}
+                            className="rounded border border-[var(--border-default)] px-3 py-1 font-mono text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--background-subtle)] hover:text-[var(--text-primary)]"
+                          >
+                            Lower min R:R
+                          </button>
+                          {isBear && (
+                            <span className="rounded border border-[var(--signal-short)]/30 bg-[var(--signal-short-muted)] px-3 py-1 font-mono text-xs text-[var(--signal-short)]">
+                              Bear Market Mode
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </td>
               </tr>
             ) : (
@@ -552,17 +588,41 @@ export function ResultsTable({
                     {r.volumeVsAvg.toFixed(1)}x AVG
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {(r.keyConfirmingFactors ?? []).slice(0, 3).map((f, j) => (
-                        <span
-                          key={j}
-                          className="rounded bg-[var(--background-subtle)] px-2 py-0.5 font-mono text-[10px] text-[var(--text-muted)]"
-                          title={(r.keyConfirmingFactors ?? []).join(", ")}
-                        >
-                          {f}
-                        </span>
-                      ))}
-                    </div>
+                    {(r.keyConfirmingFactors ?? []).length > 0 && (
+                      <div className="group relative">
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-[10px] text-[var(--signal-long)]">
+                            ✓ {(r.keyConfirmingFactors ?? [])[0].length > 22
+                              ? (r.keyConfirmingFactors ?? [])[0].slice(0, 22) + "…"
+                              : (r.keyConfirmingFactors ?? [])[0]}
+                          </span>
+                          {(r.keyConfirmingFactors ?? []).length > 1 && (
+                            <span className="rounded bg-[var(--background-subtle)] px-1 font-mono text-[10px] text-[var(--text-muted)]">
+                              +{(r.keyConfirmingFactors ?? []).length - 1}
+                            </span>
+                          )}
+                        </div>
+                        {/* Popover on hover */}
+                        <div className="absolute bottom-full right-0 z-50 mb-1 hidden w-56 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-2 shadow-lg group-hover:block">
+                          <p className="mb-1 font-mono text-[10px] font-semibold text-[var(--text-muted)] uppercase">Confirming</p>
+                          <ul className="space-y-0.5">
+                            {(r.keyConfirmingFactors ?? []).map((f, j) => (
+                              <li key={j} className="font-mono text-[11px] text-[var(--signal-long)]">✓ {f}</li>
+                            ))}
+                          </ul>
+                          {(r.primarySetup?.riskFactors ?? []).length > 0 && (
+                            <>
+                              <p className="mb-1 mt-2 font-mono text-[10px] font-semibold text-[var(--text-muted)] uppercase">Risk</p>
+                              <ul className="space-y-0.5">
+                                {(r.primarySetup?.riskFactors ?? []).map((f, j) => (
+                                  <li key={j} className="font-mono text-[11px] text-[var(--signal-short)]">⚠ {f}</li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))
