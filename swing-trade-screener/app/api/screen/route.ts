@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import type { ScreenerFilters } from "@/types";
 import { screenTicker, getMarketRegime } from "@/lib/screener";
+import { computeMarketBreadthFromAggregates } from "@/lib/utils/marketBreadth";
+import type { BreadthDataPoint } from "@/lib/utils/marketBreadth";
 import { SCREENING_UNIVERSE } from "@/constants/universe";
 
 const DEFAULT_FILTERS: ScreenerFilters = {
@@ -34,6 +36,8 @@ export async function POST(req: NextRequest) {
             )
           );
 
+          const breadthPoints: BreadthDataPoint[] = [];
+
           for (let i = 0; i < tickers.length; i += batchSize) {
             const batch = tickers.slice(i, i + batchSize);
             const results = await Promise.allSettled(
@@ -50,14 +54,24 @@ export async function POST(req: NextRequest) {
             );
             for (const r of results) {
               if (r.status === "fulfilled" && r.value) {
-                controller.enqueue(
-                  encoder.encode(
-                    JSON.stringify({ type: "result", data: r.value }) + "\n"
-                  )
-                );
+                if (r.value.breadthData) breadthPoints.push(r.value.breadthData);
+                if (r.value.result) {
+                  controller.enqueue(
+                    encoder.encode(
+                      JSON.stringify({ type: "result", data: r.value }) + "\n"
+                    )
+                  );
+                }
               }
             }
           }
+
+          const breadth = computeMarketBreadthFromAggregates(breadthPoints);
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({ type: "breadth", data: breadth }) + "\n"
+            )
+          );
 
           controller.enqueue(
             encoder.encode(JSON.stringify({ type: "done" }) + "\n")
