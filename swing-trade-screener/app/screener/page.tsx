@@ -30,7 +30,7 @@ const DEFAULT_FILTERS: ScreenerFilters = {
 export default function ScreenerPage() {
   const [filters, setFilters] = useState<ScreenerFilters>(DEFAULT_FILTERS);
   const [results, setResults] = useState<ScreenerResult[]>([]);
-  const { setRegime, setBreadth, setLastUpdated } = useRegimeStore();
+  const { regime, setRegime, setBreadth, setLastUpdated } = useRegimeStore();
   const settings = useSettingsStore();
   const [isLoading, setIsLoading] = useState(false);
   const [lastScan, setLastScan] = useState<Date | null>(null);
