@@ -19,7 +19,7 @@ import { sma50, sma200 } from "@/lib/indicators/sma";
 import { ema9 } from "@/lib/indicators/ema";
 import { rsiFull } from "@/lib/indicators/rsi";
 import { macdFull } from "@/lib/indicators/macd";
-import { vwap } from "@/lib/indicators/vwap";
+import { sessionVWAP as vwap } from "@/lib/indicators/vwap";
 import { bollingerBands } from "@/lib/indicators/bollingerBands";
 import { fibonacci } from "@/lib/indicators/fibonacci";
 import { supportResistance } from "@/lib/indicators/supportResistance";
@@ -32,14 +32,13 @@ import {
 } from "@/lib/indicators/sectorRelativeStrength";
 import { classifySetups } from "@/lib/scoring/tradeSetupClassifier";
 import { detectMarketRegime } from "@/lib/utils/marketRegime";
-import { getRecommendations, getPriceTarget, getCompanyNews } from "@/lib/utils/finnhub";
+import { getRecommendations, getPriceTarget, getCompanyNews, getEarningsCalendar } from "@/lib/utils/finnhub";
 import { analyzeNewsSentiment } from "@/lib/utils/newsSentiment";
 import { computeBreadthDataPoint, type BreadthDataPoint } from "@/lib/utils/marketBreadth";
 import { getShortInterest } from "@/lib/utils/shortInterest";
-import { computeRelativeStrength } from "@/lib/indicators/relativeStrength";
+import { computeRSAnalysis } from "@/lib/indicators/relativeStrength";
 import { getPreMarketContext } from "@/lib/utils/marketHours";
 import { currentATR, atrPercent } from "@/lib/indicators/atr";
-import { getEarningsCalendar } from "@/lib/utils/finnhub";
 import type { ATRData, EarningsData } from "@/types";
 import { FEATURES } from "@/config/features";
 
@@ -136,7 +135,7 @@ export async function screenTicker(
   ]);
 
   const breadthData = computeBreadthDataPoint(ticker, daily);
-  const rsAnalysis = spyBars && spyBars.length >= 61 ? computeRelativeStrength(daily, spyBars) : null;
+  const rsAnalysis = spyBars && spyBars.length >= 61 ? computeRSAnalysis(daily, spyBars) : null;
 
   if (daily.length < 50) return { result: null, breadthData };
 
