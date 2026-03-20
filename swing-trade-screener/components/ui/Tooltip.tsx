@@ -24,6 +24,22 @@ interface Position {
   transformOrigin: string;
 }
 
+/** Returns the bottom edge of the lowest sticky/fixed element at the top of the page */
+function getStickyBottom(): number {
+  let maxBottom = 0;
+  document.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    const style = window.getComputedStyle(el);
+    if (style.position === "sticky" || style.position === "fixed") {
+      const rect = el.getBoundingClientRect();
+      // Only count bars anchored to the top (top < 10px) with visible height
+      if (rect.top < 10 && rect.height > 0 && rect.bottom > maxBottom) {
+        maxBottom = rect.bottom;
+      }
+    }
+  });
+  return maxBottom;
+}
+
 function computePosition(
   rect: DOMRect,
   mouseX: number,
@@ -31,25 +47,30 @@ function computePosition(
   tooltipHeight: number
 ): Position {
   const MARGIN = 8;
-  const GAP = 12; // gap between trigger bottom/top and tooltip
+  const GAP = 12;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // --- Vertical: prefer below, flip above if not enough room ---
+  // Minimum top we can ever render — just below all sticky/fixed header bars
+  const minTop = getStickyBottom() + MARGIN;
+
+  // --- Vertical: prefer below trigger, flip above if not enough room ---
   const spaceBelow = vh - rect.bottom - GAP;
-  const spaceAbove = rect.top - GAP;
+  const spaceAbove = rect.top - minTop - GAP;
   const placeBelow = spaceBelow >= tooltipHeight || spaceBelow >= spaceAbove;
 
-  const top = placeBelow
+  let top = placeBelow
     ? rect.bottom + GAP
     : rect.top - GAP - tooltipHeight;
+
+  // Hard clamp — never overlap the sticky header
+  if (top < minTop) top = minTop;
 
   // --- Horizontal: center on cursor X, clamp to viewport ---
   let left = mouseX - tooltipWidth / 2;
   if (left + tooltipWidth > vw - MARGIN) left = vw - MARGIN - tooltipWidth;
   if (left < MARGIN) left = MARGIN;
 
-  // Transform origin tracks cursor relative to tooltip for smooth animation
   const originXPct = Math.min(100, Math.max(0, ((mouseX - left) / tooltipWidth) * 100));
   const transformOriginY = placeBelow ? "top" : "bottom";
   const transformOrigin = `${originXPct.toFixed(0)}% ${transformOriginY}`;
@@ -89,7 +110,6 @@ export function Tooltip({
   }, [delay, width]);
 
   const move = useCallback((e: MouseEvent) => {
-    // Update tooltip position as cursor moves across the trigger
     mouseXRef.current = e.clientX;
     if (visible && triggerRef.current && tooltipRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
@@ -103,7 +123,7 @@ export function Tooltip({
     setVisible(false);
   }, []);
 
-  // Recompute after tooltip renders (actual height known)
+  // Recompute after tooltip renders with actual height
   useEffect(() => {
     if (!visible || !triggerRef.current || !tooltipRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
