@@ -34,7 +34,10 @@ function getSectorForTicker(ticker: string): string {
 export function PortfolioPageClient() {
   const { trades, closeTrade, addTrade } = useTradeLogStore();
   const { accountSize } = useSettingsStore();
-  const openTrades = useTradeLogStore((s) => s.getOpenTrades());
+  const openTrades = useMemo(
+  () => trades.filter((t) => !t.exitDate && !t.exitPrice),
+  [trades]
+);
   const correlationGuard = useFeature("CORRELATION_GUARD");
   const [priceHistory, setPriceHistory] = useState<Record<string, OHLCVBar[]>>({});
   const [correlationAlerts, setCorrelationAlerts] = useState<PortfolioAlert[]>([]);
