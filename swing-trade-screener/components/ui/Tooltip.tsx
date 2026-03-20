@@ -6,14 +6,15 @@ import {
   useCallback,
   useEffect,
   type ReactNode,
+  type MouseEvent,
 } from "react";
 import { createPortal } from "react-dom";
 
 interface TooltipProps {
-  children: ReactNode;       // the trigger element
-  content: ReactNode;        // tooltip content
-  width?: number;            // tooltip width in px (default 256)
-  delay?: number;            // show delay in ms (default 120)
+  children: ReactNode;
+  content: ReactNode;
+  width?: number;
+  delay?: number;
   className?: string;
 }
 
@@ -25,34 +26,32 @@ interface Position {
 
 function computePosition(
   rect: DOMRect,
+  mouseX: number,
   tooltipWidth: number,
   tooltipHeight: number
 ): Position {
-  const MARGIN = 8; // px gap between trigger and tooltip
+  const MARGIN = 8;
+  const GAP = 12; // gap between trigger bottom/top and tooltip
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
   // --- Vertical: prefer below, flip above if not enough room ---
-  const spaceBelow = vh - rect.bottom - MARGIN;
-  const spaceAbove = rect.top - MARGIN;
+  const spaceBelow = vh - rect.bottom - GAP;
+  const spaceAbove = rect.top - GAP;
   const placeBelow = spaceBelow >= tooltipHeight || spaceBelow >= spaceAbove;
 
   const top = placeBelow
-    ? rect.bottom + MARGIN
-    : rect.top - MARGIN - tooltipHeight;
+    ? rect.bottom + GAP
+    : rect.top - GAP - tooltipHeight;
 
-  // --- Horizontal: align left of trigger, shift left if clips right edge ---
-  let left = rect.left;
-  if (left + tooltipWidth > vw - MARGIN) {
-    left = vw - MARGIN - tooltipWidth;
-  }
+  // --- Horizontal: center on cursor X, clamp to viewport ---
+  let left = mouseX - tooltipWidth / 2;
+  if (left + tooltipWidth > vw - MARGIN) left = vw - MARGIN - tooltipWidth;
   if (left < MARGIN) left = MARGIN;
 
+  // Transform origin tracks cursor relative to tooltip for smooth animation
+  const originXPct = Math.min(100, Math.max(0, ((mouseX - left) / tooltipWidth) * 100));
   const transformOriginY = placeBelow ? "top" : "bottom";
-  const originXPct = Math.min(
-    100,
-    Math.max(0, ((rect.left + rect.width / 2 - left) / tooltipWidth) * 100)
-  );
   const transformOrigin = `${originXPct.toFixed(0)}% ${transformOriginY}`;
 
   return { top, left, transformOrigin };
@@ -62,14 +61,15 @@ export function Tooltip({
   children,
   content,
   width = 256,
-  delay = 120,
+  delay = 100,
   className,
 }: TooltipProps) {
   const [visible, setVisible] = useState(false);
-  const [pos, setPos] = useState<Position>({ top: 0, left: 0, transformOrigin: "top left" });
+  const [pos, setPos] = useState<Position>({ top: 0, left: 0, transformOrigin: "50% top" });
   const triggerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseXRef = useRef<number>(0);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -77,28 +77,38 @@ export function Tooltip({
     return () => setMounted(false);
   }, []);
 
-  const show = useCallback(() => {
+  const show = useCallback((e: MouseEvent) => {
+    mouseXRef.current = e.clientX;
     timerRef.current = setTimeout(() => {
       if (!triggerRef.current) return;
       const rect = triggerRef.current.getBoundingClientRect();
-      // Measure tooltip height — estimate 120px, recalc after render
       const estimatedHeight = tooltipRef.current?.offsetHeight ?? 120;
-      setPos(computePosition(rect, width, estimatedHeight));
+      setPos(computePosition(rect, mouseXRef.current, width, estimatedHeight));
       setVisible(true);
     }, delay);
   }, [delay, width]);
+
+  const move = useCallback((e: MouseEvent) => {
+    // Update tooltip position as cursor moves across the trigger
+    mouseXRef.current = e.clientX;
+    if (visible && triggerRef.current && tooltipRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const actualHeight = tooltipRef.current.offsetHeight;
+      setPos(computePosition(rect, mouseXRef.current, width, actualHeight));
+    }
+  }, [visible, width]);
 
   const hide = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setVisible(false);
   }, []);
 
-  // Recompute position after tooltip renders (actual height known)
+  // Recompute after tooltip renders (actual height known)
   useEffect(() => {
     if (!visible || !triggerRef.current || !tooltipRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     const actualHeight = tooltipRef.current.offsetHeight;
-    setPos(computePosition(rect, width, actualHeight));
+    setPos(computePosition(rect, mouseXRef.current, width, actualHeight));
   }, [visible, width]);
 
   return (
@@ -106,8 +116,14 @@ export function Tooltip({
       <div
         ref={triggerRef}
         onMouseEnter={show}
+        onMouseMove={move}
         onMouseLeave={hide}
-        onFocus={show}
+        onFocus={(e) => {
+          if (!triggerRef.current) return;
+          const rect = triggerRef.current.getBoundingClientRect();
+          mouseXRef.current = rect.left + rect.width / 2;
+          show(e as unknown as MouseEvent);
+        }}
         onBlur={hide}
         className={className}
         style={{ display: "contents" }}
@@ -120,7 +136,6 @@ export function Tooltip({
           <div
             ref={tooltipRef}
             role="tooltip"
-            onMouseLeave={hide}
             style={{
               position: "fixed",
               top: pos.top,
