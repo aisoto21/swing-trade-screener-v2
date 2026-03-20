@@ -171,7 +171,23 @@ export function PortfolioPageClient() {
     try {
       return computePortfolioMetrics(filteredOpenTrades, currentPrices, accountSize);
     } catch {
-      return { alerts: [], totalValue: 0, totalPnL: 0, totalPnLPercent: 0 };
+      return {
+        alerts: [] as PortfolioAlert[],
+        totalLongExposure: 0,
+        totalShortExposure: 0,
+        netExposure: 0,
+        totalExposurePercent: 0,
+        openPositions: 0,
+        longCount: 0,
+        shortCount: 0,
+        sectorBreakdown: {},
+        totalDollarAtRisk: 0,
+        percentAtRisk: 0,
+        openRiskBySector: {},
+        avgHoldDays: 0,
+        holdsByStrategy: {},
+        betaWeightedExposure: 0,
+      };
     }
   })();
   const allAlerts = [...(portfolioMetrics.alerts ?? []), ...correlationAlerts];
