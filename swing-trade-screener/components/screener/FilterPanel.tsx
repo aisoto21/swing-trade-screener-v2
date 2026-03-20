@@ -56,6 +56,28 @@ export function FilterPanel({
   };
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
+  // Local string state for number inputs so typing works without fighting the parser
+  const [accountSizeStr, setAccountSizeStr] = useState(String(filters.accountSize));
+  const [riskStr, setRiskStr] = useState((filters.riskPerTrade * 100).toFixed(1));
+
+  const commitAccountSize = () => {
+    const parsed = parseInt(accountSizeStr.replace(/,/g, ""), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      update({ accountSize: parsed });
+    } else {
+      setAccountSizeStr(String(filters.accountSize));
+    }
+  };
+
+  const commitRisk = () => {
+    const parsed = parseFloat(riskStr);
+    if (!isNaN(parsed) && parsed > 0 && parsed <= 10) {
+      update({ riskPerTrade: parsed / 100 });
+    } else {
+      setRiskStr((filters.riskPerTrade * 100).toFixed(1));
+    }
+  };
+
   const hasActiveAdvanced =
     (filters.minRSRating ?? 0) > 0 ||
     filters.excludeEarningsRisk ||
@@ -117,21 +139,33 @@ export function FilterPanel({
           )}
         </button>
 
-        <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs text-[var(--text-muted)]">$</span>
             <Input
-              type="number" value={filters.accountSize}
-              onChange={(e) => update({ accountSize: parseInt(e.target.value) || 25000 })}
+              type="text"
+              inputMode="numeric"
+              data-field="accountSize"
+              value={accountSizeStr}
+              onChange={(e) => setAccountSizeStr(e.target.value)}
+              onBlur={commitAccountSize}
+              onKeyDown={(e) => e.key === "Enter" && commitAccountSize()}
               className="h-8 w-24 font-mono text-xs tabular-nums"
+              placeholder="25000"
             />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs text-[var(--text-muted)]">Risk</span>
             <Input
-              type="number" value={(filters.riskPerTrade * 100).toFixed(1)}
-              onChange={(e) => update({ riskPerTrade: (parseFloat(e.target.value) || 1) / 100 })}
+              type="text"
+              inputMode="decimal"
+              data-field="risk"
+              value={riskStr}
+              onChange={(e) => setRiskStr(e.target.value)}
+              onBlur={commitRisk}
+              onKeyDown={(e) => e.key === "Enter" && commitRisk()}
               className="h-8 w-14 font-mono text-xs tabular-nums"
+              placeholder="1.0"
             />
             <span className="font-mono text-xs text-[var(--text-muted)]">%</span>
           </div>
