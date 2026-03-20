@@ -4,6 +4,7 @@ import { useMemo, useState, useRef, useEffect } from "react";
 import { SetupBadge } from "./SetupBadge";
 import { GradeBadge } from "./GradeBadge";
 import { RSBadge } from "./RSBadge";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { isPreMarketOrFirstHour } from "@/lib/utils/marketHours";
 import { useFeature } from "@/lib/hooks/useFeature";
 import { useWatchlistStore } from "@/lib/stores/watchlistStore";
@@ -589,21 +590,8 @@ export function ResultsTable({
                   </td>
                   <td className="px-3 py-2">
                     {(r.keyConfirmingFactors ?? []).length > 0 && (
-                      <div className="group relative">
-                        <div className="flex items-center gap-1">
-                          <span className="font-mono text-[10px] text-[var(--signal-long)]">
-                            ✓ {(r.keyConfirmingFactors ?? [])[0].length > 22
-                              ? (r.keyConfirmingFactors ?? [])[0].slice(0, 22) + "…"
-                              : (r.keyConfirmingFactors ?? [])[0]}
-                          </span>
-                          {(r.keyConfirmingFactors ?? []).length > 1 && (
-                            <span className="rounded bg-[var(--background-subtle)] px-1 font-mono text-[10px] text-[var(--text-muted)]">
-                              +{(r.keyConfirmingFactors ?? []).length - 1}
-                            </span>
-                          )}
-                        </div>
-                        {/* Popover on hover */}
-                        <div className="absolute bottom-full right-0 z-50 mb-1 hidden w-56 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-2 shadow-lg group-hover:block">
+                      <Tooltip width={256} content={
+                        <>
                           <p className="mb-1 font-mono text-[10px] font-semibold text-[var(--text-muted)] uppercase">Confirming</p>
                           <ul className="space-y-0.5">
                             {(r.keyConfirmingFactors ?? []).map((f, j) => (
@@ -620,8 +608,21 @@ export function ResultsTable({
                               </ul>
                             </>
                           )}
+                        </>
+                      }>
+                        <div className="flex cursor-default items-center gap-1">
+                          <span className="font-mono text-[10px] text-[var(--signal-long)]">
+                            ✓ {(r.keyConfirmingFactors ?? [])[0].length > 22
+                              ? (r.keyConfirmingFactors ?? [])[0].slice(0, 22) + "…"
+                              : (r.keyConfirmingFactors ?? [])[0]}
+                          </span>
+                          {(r.keyConfirmingFactors ?? []).length > 1 && (
+                            <span className="rounded bg-[var(--background-subtle)] px-1 font-mono text-[10px] text-[var(--text-muted)]">
+                              +{(r.keyConfirmingFactors ?? []).length - 1}
+                            </span>
+                          )}
                         </div>
-                      </div>
+                      </Tooltip>
                     )}
                   </td>
                 </tr>
