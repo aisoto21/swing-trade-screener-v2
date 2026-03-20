@@ -3,6 +3,7 @@
 import { memo } from "react";
 import type { ATRData } from "@/types";
 import { cn } from "@/lib/utils/cn";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 interface ATRBadgeProps {
   atr: ATRData;
@@ -10,55 +11,22 @@ interface ATRBadgeProps {
   className?: string;
 }
 
-export const ATRBadge = memo(function ATRBadge({
-  atr,
-  stopAtrMultiple,
-  className,
-}: ATRBadgeProps) {
+export const ATRBadge = memo(function ATRBadge({ atr, stopAtrMultiple, className }: ATRBadgeProps) {
   const isHighVol = atr.atrPercent > 4;
   const isLowVol = atr.atrPercent < 1;
-
-  const volColor = isHighVol
-    ? "text-[var(--regime-choppy)]"
-    : isLowVol
-    ? "text-[var(--text-muted)]"
-    : "text-[var(--text-secondary)]";
+  const volColor = isHighVol ? "text-[var(--regime-choppy)]" : isLowVol ? "text-[var(--text-muted)]" : "text-[var(--text-secondary)]";
 
   return (
-    <div className={cn("group relative inline-flex flex-col gap-0.5", className)}>
-      <span className={cn("font-mono text-xs tabular-nums", volColor)}>
-        {atr.atrPercent.toFixed(1)}% ATR
-      </span>
-      {stopAtrMultiple !== undefined && (
-        <span className="font-mono text-[10px] text-[var(--text-muted)]">
-          Stop: {stopAtrMultiple.toFixed(1)}×
-        </span>
-      )}
-
-      {/* Tooltip — pops DOWN to avoid clipping into sticky headers above */}
-      <div className="absolute top-full left-0 z-[200] mt-1 hidden w-60 rounded border border-[var(--border-default)] bg-[var(--background-elevated)] p-3 shadow-lg group-hover:block">
-        <p className="mb-1 font-mono text-xs font-semibold text-[var(--text-primary)]">
-          Volatility Context (ATR 14)
-        </p>
+    <Tooltip width={240} className={cn("inline-flex flex-col gap-0.5", className)} content={
+      <>
+        <p className="mb-1 font-mono text-xs font-semibold text-[var(--text-primary)]">Volatility Context (ATR 14)</p>
         <div className="space-y-1 font-mono text-[11px]">
-          <div className="flex justify-between">
-            <span className="text-[var(--text-muted)]">ATR (14-day)</span>
-            <span className="text-[var(--text-primary)]">${atr.current.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-[var(--text-muted)]">ATR as % of price</span>
-            <span className={volColor}>{atr.atrPercent.toFixed(2)}%</span>
-          </div>
+          <div className="flex justify-between gap-4"><span className="text-[var(--text-muted)]">ATR (14-day)</span><span className="text-[var(--text-primary)]">${atr.current.toFixed(2)}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-[var(--text-muted)]">ATR as % of price</span><span className={volColor}>{atr.atrPercent.toFixed(2)}%</span></div>
           {stopAtrMultiple !== undefined && (
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-[var(--text-muted)]">Stop distance</span>
-              <span className={
-                stopAtrMultiple < 0.8 ? "text-[var(--signal-short)]"
-                : stopAtrMultiple > 2 ? "text-[var(--regime-choppy)]"
-                : "text-[var(--signal-long)]"
-              }>
-                {stopAtrMultiple.toFixed(2)}× ATR
-              </span>
+              <span className={stopAtrMultiple < 0.8 ? "text-[var(--signal-short)]" : stopAtrMultiple > 2 ? "text-[var(--regime-choppy)]" : "text-[var(--signal-long)]"}>{stopAtrMultiple.toFixed(2)}× ATR</span>
             </div>
           )}
         </div>
@@ -67,12 +35,15 @@ export const ATRBadge = memo(function ATRBadge({
           <p>0.5–2.5× ATR: Optimal range ✓</p>
           <p>{"> 2.5× ATR: Stop too wide (excess risk)"}</p>
         </div>
-        {isHighVol && (
-          <p className="mt-1 text-[10px] text-[var(--regime-choppy)]">
-            High volatility stock — use reduced position size.
-          </p>
+        {isHighVol && <p className="mt-1 text-[10px] text-[var(--regime-choppy)]">High volatility stock — use reduced position size.</p>}
+      </>
+    }>
+      <span className="cursor-default">
+        <span className={cn("font-mono text-xs tabular-nums", volColor)}>{atr.atrPercent.toFixed(1)}% ATR</span>
+        {stopAtrMultiple !== undefined && (
+          <span className="block font-mono text-[10px] text-[var(--text-muted)]">Stop: {stopAtrMultiple.toFixed(1)}×</span>
         )}
-      </div>
-    </div>
+      </span>
+    </Tooltip>
   );
 });
