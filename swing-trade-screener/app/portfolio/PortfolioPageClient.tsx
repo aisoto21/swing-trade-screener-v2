@@ -122,10 +122,14 @@ export function PortfolioPageClient() {
     );
   }, [correlationGuard, openTrades, priceHistory, accountSize]);
 
-  const currentPrices: Record<string, number> = {};
-  for (const t of openTrades) {
-    currentPrices[t.ticker] = livePrices[t.ticker] ?? t.entryPrice;
-  }
+  // currentPrices must be in useMemo — NOT a bare for loop — to keep hooks in fixed order
+  const currentPrices = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of openTrades) {
+      map[t.ticker] = livePrices[t.ticker] ?? t.entryPrice;
+    }
+    return map;
+  }, [openTrades, livePrices]);
 
   const sectorExposure = useMemo(() => {
     const bySector: Record<
