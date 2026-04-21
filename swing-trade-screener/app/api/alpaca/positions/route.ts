@@ -2,6 +2,8 @@
 // Returns current open positions from Alpaca for live P&L in the UI.
 // Falls back to empty array if Alpaca is unreachable.
 
+export const dynamic = "force-dynamic"; // never cache — reads live Alpaca data
+
 import { getPositions } from "@/lib/alpaca/client";
 
 export async function GET() {

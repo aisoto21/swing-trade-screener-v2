@@ -1,6 +1,8 @@
 // GET /api/alpaca/trades
 // Returns all stored AlpacaTrade records from KV for the Auto Testing tab.
 
+export const dynamic = "force-dynamic"; // never cache — reads live Redis data
+
 import { getTrades } from "@/lib/alpaca/trades";
 
 export async function GET() {
