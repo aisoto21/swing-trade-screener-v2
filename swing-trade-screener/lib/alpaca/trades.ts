@@ -1,34 +1,32 @@
 // =============================================================================
-// ALPACA TRADE PERSISTENCE — Vercel KV (Upstash Redis)
-// TODO: @vercel/kv is deprecated; migrate to @upstash/redis when upgrading.
-//
-// @vercel/kv requires KV_REST_API_URL + KV_REST_API_TOKEN.
-// Vercel's storage integration may inject these under a different prefix
-// (e.g. KVRESTSTORAGE_REDIS_URL / KVRESTSTORAGE_REDIS_TOKEN).
-// createClient lets us pass the URL/token explicitly with a fallback chain.
+// ALPACA TRADE PERSISTENCE — ioredis (TCP Redis)
+// Uses KVRESTSTORAGE_REDIS_URL injected by Vercel's Redis integration.
+// ioredis accepts redis:// and rediss:// connection strings, unlike @vercel/kv
+// which requires an Upstash HTTP REST URL (https://).
 // =============================================================================
 
-import { createClient } from "@vercel/kv";
+import Redis from "ioredis";
 import type { AlpacaTrade } from "@/types/alpaca";
 
-const kv = createClient({
-  url:
-    process.env.KV_REST_API_URL ??
-    process.env.KVRESTSTORAGE_REDIS_URL ??
-    "",
-  token:
-    process.env.KV_REST_API_TOKEN ??
-    process.env.KVRESTSTORAGE_REDIS_TOKEN ??
-    "",
-});
+// Module-level singleton — reused across warm invocations on the same instance.
+// lazyConnect: true avoids connecting at module load time (safe for build phase).
+const redis = new Redis(
+  process.env.KVRESTSTORAGE_REDIS_URL ?? "redis://localhost:6379",
+  {
+    lazyConnect: true,
+    maxRetriesPerRequest: 3,
+    enableOfflineQueue: false,
+  }
+);
 
 const TRADES_KEY = "alpaca:trades";
 
-// Read all stored trades. Returns [] if KV is empty or unreachable.
+// Read all stored trades. Returns [] if key is empty or Redis is unreachable.
 export async function getTrades(): Promise<AlpacaTrade[]> {
   try {
-    const trades = await kv.get<AlpacaTrade[]>(TRADES_KEY);
-    return trades ?? [];
+    const raw = await redis.get(TRADES_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as AlpacaTrade[];
   } catch {
     return [];
   }
@@ -36,7 +34,7 @@ export async function getTrades(): Promise<AlpacaTrade[]> {
 
 // Overwrite the full trades list.
 export async function saveTrades(trades: AlpacaTrade[]): Promise<void> {
-  await kv.set(TRADES_KEY, trades);
+  await redis.set(TRADES_KEY, JSON.stringify(trades));
 }
 
 // Get trades filtered by phase.
