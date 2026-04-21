@@ -64,19 +64,12 @@ export async function updateTrade(
   await saveTrades(trades);
 }
 
-// Dedup check: has this ticker+direction+setupType already been submitted today?
-export async function alreadySubmittedToday(
-  ticker: string,
-  direction: "long" | "short",
-  setupType: string
-): Promise<boolean> {
+// Dedup check: has this ticker already been submitted today (any direction)?
+// Checks ticker only to prevent long + short conflict on the same symbol.
+export async function alreadySubmittedToday(ticker: string): Promise<boolean> {
   const trades = await getTrades();
   const todayPrefix = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
   return trades.some(
-    (t) =>
-      t.ticker === ticker &&
-      t.direction === direction &&
-      t.setupType === setupType &&
-      t.submittedAt.startsWith(todayPrefix)
+    (t) => t.ticker === ticker && t.submittedAt.startsWith(todayPrefix)
   );
 }

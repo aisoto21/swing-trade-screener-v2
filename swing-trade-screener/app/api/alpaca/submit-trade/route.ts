@@ -1,8 +1,13 @@
 // =============================================================================
 // POST /api/alpaca/submit-trade
-// Receives a ScreenerResult, calculates fixed-fractional position sizing,
-// deduplicates, submits entry+stop (OTO) and T1 limit orders to Alpaca,
-// persists the AlpacaTrade record to KV.
+// Receives a ScreenerResult, calculates position sizing, deduplicates,
+// and submits a single bracket order (entry limit + stop loss + T1 take profit).
+//
+// Fixes applied:
+//   1. MAX_NOTIONAL cap prevents absurdly large positions from tight stops
+//   2. Bracket order replaces OTO + separate T1 — avoids "held for orders" block
+//   3. "cannot be sold short" caught as a skip, not an error
+//   4. Dedup checks ticker only (any direction) to prevent long/short conflict
 // =============================================================================
 
 import { NextRequest } from "next/server";
@@ -11,8 +16,8 @@ import type { AlpacaTrade } from "@/types/alpaca";
 import { submitOrder } from "@/lib/alpaca/client";
 import { addTrade, alreadySubmittedToday } from "@/lib/alpaca/trades";
 
-// Fixed fractional: $100k account, 1% risk = $1,000 per trade.
-const RISK_DOLLARS = 1000;
+const RISK_DOLLARS = 1000;  // 1% of $100k account
+const MAX_NOTIONAL = 15000; // hard cap — prevents tight-stop shares from blowing up
 
 interface SubmitTradeBody {
   result: ScreenerResult;
@@ -20,6 +25,7 @@ interface SubmitTradeBody {
 
 export async function POST(req: NextRequest) {
   const timestamp = new Date().toISOString();
+  let ticker = "UNKNOWN";
 
   try {
     const body: SubmitTradeBody = await req.json();
@@ -29,7 +35,8 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "Invalid setup payload" }, { status: 400 });
     }
 
-    const { primarySetup, ticker } = result;
+    ticker = result.ticker;
+    const { primarySetup } = result;
     const { tradeParams } = primarySetup;
 
     const direction: "long" | "short" =
@@ -37,44 +44,38 @@ export async function POST(req: NextRequest) {
     const setupType = primarySetup.name;
     const grade = primarySetup.grade;
 
-    // Entry = high end of entry zone
     const entryPrice = tradeParams.entry.zone[1];
     const stopPrice = tradeParams.stop.price;
     const t1Price = tradeParams.targets.t1.price;
     const t2Price = tradeParams.targets.t2.price;
 
-    // Validate stop distance
+    // Validate stop distance (catches inverted stops and zero-distance setups)
     const stopDistance =
       direction === "long"
         ? entryPrice - stopPrice
         : stopPrice - entryPrice;
 
-    if (stopDistance <= 0 || entryPrice === stopPrice) {
+    if (stopDistance <= 0) {
       console.warn(
         `[alpaca] [${timestamp}] Skipping ${ticker} — invalid stop distance: entry=${entryPrice} stop=${stopPrice}`
       );
-      return Response.json({
-        skipped: true,
-        reason: "Invalid stop distance",
-        ticker,
-      });
+      return Response.json({ skipped: true, reason: "Invalid stop distance", ticker });
     }
 
-    // Deduplicate
-    const isDuplicate = await alreadySubmittedToday(ticker, direction, setupType);
+    // Dedup: ticker only — prevents submitting both long and short on same symbol
+    const isDuplicate = await alreadySubmittedToday(ticker);
     if (isDuplicate) {
-      return Response.json({
-        skipped: true,
-        reason: "Already submitted today",
-        ticker,
-      });
+      return Response.json({ skipped: true, reason: "Already submitted today", ticker });
     }
 
-    // Fixed fractional position sizing
-    const totalShares = Math.floor(RISK_DOLLARS / stopDistance);
+    // Position sizing: risk-based, capped at MAX_NOTIONAL
+    const byRisk = Math.floor(RISK_DOLLARS / stopDistance);
+    const byNotional = Math.floor(MAX_NOTIONAL / entryPrice);
+    const totalShares = Math.min(byRisk, byNotional);
+
     if (totalShares === 0) {
       console.warn(
-        `[alpaca] [${timestamp}] Skipping ${ticker} — calculated 0 shares (stop distance: ${stopDistance.toFixed(4)})`
+        `[alpaca] [${timestamp}] Skipping ${ticker} — 0 shares calculated (stopDistance=${stopDistance.toFixed(4)}, entryPrice=${entryPrice})`
       );
       return Response.json({ skipped: true, reason: "0 shares calculated", ticker });
     }
@@ -82,37 +83,28 @@ export async function POST(req: NextRequest) {
     const t1Qty = Math.floor(totalShares / 2);
     const phase2Qty = totalShares - t1Qty;
 
-    // --- Submit primary order: OTO (entry limit + stop loss leg) ---
+    // Submit single bracket order: entry limit + stop loss + T1 take profit.
+    // Bracket keeps all legs atomic — no "held for orders" conflict with a
+    // separate T1 sell, which was the failure mode of the prior OTO approach.
     const entrySide = direction === "long" ? "buy" : "sell";
-    const primaryBody: Record<string, unknown> = {
+    const bracketBody: Record<string, unknown> = {
       symbol: ticker,
       qty: String(totalShares),
       side: entrySide,
       type: "limit",
       limit_price: String(entryPrice.toFixed(2)),
       time_in_force: "day",
-      order_class: "oto",
+      order_class: "bracket",
       stop_loss: {
         stop_price: String(stopPrice.toFixed(2)),
       },
+      take_profit: {
+        limit_price: String(t1Price.toFixed(2)),
+      },
     };
 
-    const primaryOrder = await submitOrder(primaryBody);
+    const bracketOrder = await submitOrder(bracketBody);
 
-    // --- Submit T1 order: separate limit order (take-profit at T1) ---
-    const t1Side = direction === "long" ? "sell" : "buy";
-    const t1Body: Record<string, unknown> = {
-      symbol: ticker,
-      qty: String(t1Qty),
-      side: t1Side,
-      type: "limit",
-      limit_price: String(t1Price.toFixed(2)),
-      time_in_force: "day",
-    };
-
-    const t1Order = await submitOrder(t1Body);
-
-    // --- Persist trade ---
     const trade: AlpacaTrade = {
       tradeId: crypto.randomUUID(),
       ticker,
@@ -126,8 +118,8 @@ export async function POST(req: NextRequest) {
       totalShares,
       t1Qty,
       phase2Qty,
-      primaryOrderId: primaryOrder.id,
-      t1OrderId: t1Order.id,
+      primaryOrderId: bracketOrder.id,
+      t1OrderId: bracketOrder.id, // bracket handles T1 internally
       phase: 1,
       submittedAt: timestamp,
       t1FilledAt: null,
@@ -138,14 +130,20 @@ export async function POST(req: NextRequest) {
     await addTrade(trade);
 
     console.log(
-      `[alpaca] [${timestamp}] Submitted ${direction.toUpperCase()} ${ticker} — ${totalShares} shares @ ${entryPrice} | stop ${stopPrice} | T1 ${t1Price} (${t1Qty} shares)`
+      `[alpaca] [${timestamp}] Submitted ${direction.toUpperCase()} ${ticker} — ${totalShares} shares @ ${entryPrice.toFixed(2)} | stop ${stopPrice.toFixed(2)} | T1 ${t1Price.toFixed(2)} [bracket]`
     );
 
     return Response.json({ success: true, tradeId: trade.tradeId, ticker });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+
+    // Non-shortable asset — skip gracefully instead of logging as error
+    if (message.includes("cannot be sold short")) {
+      console.warn(`[alpaca] [${timestamp}] Skipping ${ticker} — not shortable on Alpaca`);
+      return Response.json({ skipped: true, reason: "Not shortable on Alpaca", ticker });
+    }
+
     console.error(`[alpaca] [${timestamp}] submit-trade error: ${message}`);
-    // Do NOT return 500 — screener UI must not crash
     return Response.json({ error: message, success: false }, { status: 200 });
   }
 }
