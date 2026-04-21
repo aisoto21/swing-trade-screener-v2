@@ -66,8 +66,16 @@ export async function cancelOrder(orderId: string): Promise<void> {
 }
 
 // Fetch all open positions.
+// Alpaca returns 404 when the account has no open positions — treat as empty array.
 export async function getPositions(): Promise<AlpacaPosition[]> {
-  return alpacaFetch<AlpacaPosition[]>("/v2/positions");
+  const url = `${getBaseUrl()}/v2/positions`;
+  const res = await fetch(url, { headers: getHeaders() });
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Alpaca API ${res.status}: ${body}`);
+  }
+  return res.json() as Promise<AlpacaPosition[]>;
 }
 
 // Fetch account info.

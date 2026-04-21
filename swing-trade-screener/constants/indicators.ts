@@ -44,6 +44,9 @@ export const DEFAULT_ACCOUNT_SIZE = 25000;
 export const DEFAULT_RISK_PER_TRADE = 0.01;
 export const CONCENTRATION_WARNING_THRESHOLD = 0.05; // 5% of portfolio
 
+// Gap Analysis
+export const MIN_GAP_PCT = 0.005; // 0.5% minimum gap size to qualify as tradeable
+
 // Pre-filters
 export const MIN_PRICE = 10;
 export const MIN_AVG_VOLUME = 500000;

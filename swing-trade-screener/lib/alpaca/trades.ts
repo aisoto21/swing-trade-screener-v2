@@ -1,18 +1,37 @@
 // =============================================================================
 // ALPACA TRADE PERSISTENCE — Vercel KV (Upstash Redis)
 // TODO: @vercel/kv is deprecated; migrate to @upstash/redis when upgrading.
-//       API and env vars (KV_REST_API_URL, KV_REST_API_TOKEN) are identical.
+//
+// @vercel/kv requires KV_REST_API_URL + KV_REST_API_TOKEN.
+// Vercel's storage integration may inject these under a different prefix
+// (e.g. KVRESTSTORAGE_REDIS_URL / KVRESTSTORAGE_REDIS_TOKEN).
+// createClient lets us pass the URL/token explicitly with a fallback chain.
 // =============================================================================
 
-import { kv } from "@vercel/kv";
+import { createClient } from "@vercel/kv";
 import type { AlpacaTrade } from "@/types/alpaca";
+
+const kv = createClient({
+  url:
+    process.env.KV_REST_API_URL ??
+    process.env.KVRESTSTORAGE_REDIS_URL ??
+    "",
+  token:
+    process.env.KV_REST_API_TOKEN ??
+    process.env.KVRESTSTORAGE_REDIS_TOKEN ??
+    "",
+});
 
 const TRADES_KEY = "alpaca:trades";
 
-// Read all stored trades.
+// Read all stored trades. Returns [] if KV is empty or unreachable.
 export async function getTrades(): Promise<AlpacaTrade[]> {
-  const trades = await kv.get<AlpacaTrade[]>(TRADES_KEY);
-  return trades ?? [];
+  try {
+    const trades = await kv.get<AlpacaTrade[]>(TRADES_KEY);
+    return trades ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // Overwrite the full trades list.
