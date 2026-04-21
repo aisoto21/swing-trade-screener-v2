@@ -14,11 +14,10 @@ import { NextRequest } from "next/server";
 import type { ScreenerResult } from "@/types";
 import type { AlpacaTrade } from "@/types/alpaca";
 import { submitOrder } from "@/lib/alpaca/client";
-import { getTrades, addTrade, alreadySubmittedToday } from "@/lib/alpaca/trades";
+import { addTrade, alreadySubmittedToday } from "@/lib/alpaca/trades";
 
 const RISK_DOLLARS = 1000;  // 1% of $100k account
-const MAX_NOTIONAL = 10000; // hard cap per position — keeps buying power manageable
-const MAX_POSITIONS = 6;    // max concurrent open bracket orders
+const MAX_NOTIONAL = 10000; // hard cap per position — $10k × 10 = $100k max exposure
 
 interface SubmitTradeBody {
   result: ScreenerResult;
@@ -67,13 +66,6 @@ export async function POST(req: NextRequest) {
     const isDuplicate = await alreadySubmittedToday(ticker);
     if (isDuplicate) {
       return Response.json({ skipped: true, reason: "Already submitted today", ticker });
-    }
-
-    // Max open positions guard — prevents draining account on large scans
-    const allTrades = await getTrades();
-    const openCount = allTrades.filter((t) => t.phase !== "closed").length;
-    if (openCount >= MAX_POSITIONS) {
-      return Response.json({ skipped: true, reason: "Max open positions reached", ticker });
     }
 
     // Position sizing: risk-based, capped at MAX_NOTIONAL
@@ -149,6 +141,12 @@ export async function POST(req: NextRequest) {
     if (message.includes("Alpaca API 422:")) {
       console.warn(`[alpaca] [${timestamp}] Skipping ${ticker} — untradeable: ${message}`);
       return Response.json({ skipped: true, reason: "Untradeable asset", ticker });
+    }
+
+    // Buying power exhausted — account is full, skip cleanly (not an error)
+    if (message.includes("insufficient buying power")) {
+      console.warn(`[alpaca] [${timestamp}] Skipping ${ticker} — insufficient buying power`);
+      return Response.json({ skipped: true, reason: "Insufficient buying power", ticker });
     }
 
     console.error(`[alpaca] [${timestamp}] submit-trade error: ${message}`);

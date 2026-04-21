@@ -95,21 +95,32 @@ export default function ScreenerPage() {
 
   // Fire-and-forget: submit each screener result to Alpaca paper trading after
   // the scan completes. Uses a scanId so we never double-submit the same run.
+  // Results are sorted by grade (A+ → A → B → C) so highest-conviction plays
+  // claim buying power first — lower-grade trades get skipped if account fills.
   useEffect(() => {
     if (isLoading || results.length === 0) return;
     const scanId = results.map((r) => r.ticker).join(",");
     if (scanId === submittedScanId) return;
     setSubmittedScanId(scanId);
 
-    for (const result of results) {
-      void fetch("/api/alpaca/submit-trade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ result }),
-      }).catch(() => {
-        // Errors are logged server-side; never block the UI
-      });
-    }
+    const gradeOrder: Record<string, number> = { "A+": 0, "A": 1, "B": 2, "C": 3 };
+    const sorted = [...results].sort(
+      (a, b) =>
+        (gradeOrder[a.primarySetup?.grade ?? "C"] ?? 3) -
+        (gradeOrder[b.primarySetup?.grade ?? "C"] ?? 3)
+    );
+
+    sorted.forEach((result, i) => {
+      setTimeout(() => {
+        void fetch("/api/alpaca/submit-trade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ result }),
+        }).catch(() => {
+          // Errors are logged server-side; never block the UI
+        });
+      }, i * 200); // 200 ms stagger — ensures A+ orders clear before B/C race in
+    });
   }, [isLoading, results, submittedScanId]);
 
   const runScreener = useCallback(async () => {
