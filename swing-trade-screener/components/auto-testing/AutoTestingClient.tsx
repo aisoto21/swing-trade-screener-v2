@@ -153,15 +153,19 @@ function BreakdownTable({
   rows: Array<{ label: string } & Stats>;
   title: string;
 }) {
-  if (rows.length === 0) {
-    return null;
-  }
   return (
     <div>
       <h3 className="mb-2 font-mono text-xs font-semibold text-[var(--text-secondary)]">
         {title}
       </h3>
-      <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-[var(--border-default)] px-4 py-3">
+          <p className="font-sans text-sm text-[var(--text-muted)]">
+            No closed trades yet — data will populate here automatically.
+          </p>
+        </div>
+      ) : null}
+      {rows.length > 0 && <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
         <table className="w-full">
           <thead>
             <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
@@ -226,7 +230,7 @@ function BreakdownTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -467,13 +471,11 @@ export function AutoTestingClient() {
                 />
               </div>
 
-              {/* Breakdown tables */}
-              {closedTrades.length > 0 && (
-                <div className="mt-6 grid gap-6 md:grid-cols-2">
-                  <BreakdownTable rows={gradeRows} title="BY GRADE" />
-                  <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
-                </div>
-              )}
+              {/* Breakdown tables — always rendered; empty state shown when no closed trades */}
+              <div className="mt-6 grid gap-6 md:grid-cols-2">
+                <BreakdownTable rows={gradeRows} title="BY GRADE" />
+                <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
+              </div>
             </section>
 
             {/* ---------------------------------------------------------------- */}
