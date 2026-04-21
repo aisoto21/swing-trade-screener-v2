@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/screener?mode=quality", label: "Quality Growth" },
   { href: "/screener?mode=value", label: "Deep Value" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/auto-testing", label: "Auto Testing" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -23,6 +24,7 @@ export function HubNav() {
           pathname === item.href ||
           (item.href.startsWith("/screener") && pathname === "/screener") ||
           (item.href === "/portfolio" && pathname === "/portfolio") ||
+          (item.href === "/auto-testing" && pathname === "/auto-testing") ||
           (item.href === "/settings" && pathname === "/settings");
         const isComingSoon =
           item.label === "Position" ||

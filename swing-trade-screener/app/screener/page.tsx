@@ -37,6 +37,8 @@ export default function ScreenerPage() {
   const [progress, setProgress] = useState({ current: 0, total: SCREENING_UNIVERSE.length });
   const [failedCount, setFailedCount] = useState(0);
   const [scoringModalOpen, setScoringModalOpen] = useState(false);
+  // Track whether this scan's results have already been submitted to Alpaca
+  const [submittedScanId, setSubmittedScanId] = useState<string | null>(null);
   const [optionsMode, setOptionsMode] = useState<"Stocks" | "Options" | "Both">("Stocks");
   const [optionsRecommendations, setOptionsRecommendations] = useState<Record<string, ContractRecommendation | null>>({});
   const optionsLayer = useFeature("OPTIONS_LAYER");
@@ -90,6 +92,25 @@ export default function ScreenerPage() {
     settings.optionsDTEMultiplier, settings.optionsAllowNaked,
     settings.optionsAllowSpreads, settings.optionsAllowPMCC,
   ]);
+
+  // Fire-and-forget: submit each screener result to Alpaca paper trading after
+  // the scan completes. Uses a scanId so we never double-submit the same run.
+  useEffect(() => {
+    if (isLoading || results.length === 0) return;
+    const scanId = results.map((r) => r.ticker).join(",");
+    if (scanId === submittedScanId) return;
+    setSubmittedScanId(scanId);
+
+    for (const result of results) {
+      void fetch("/api/alpaca/submit-trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ result }),
+      }).catch(() => {
+        // Errors are logged server-side; never block the UI
+      });
+    }
+  }, [isLoading, results, submittedScanId]);
 
   const runScreener = useCallback(async () => {
     setIsLoading(true);
