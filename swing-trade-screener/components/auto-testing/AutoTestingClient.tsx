@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { RefreshCw, X, Download } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/formatter";
-import type { AlpacaTrade } from "@/types/alpaca";
-import type { AlpacaPosition } from "@/types/alpaca";
+import type { AlpacaTrade, AlpacaPosition } from "@/types/alpaca";
 
 // =============================================================================
 // HELPERS
@@ -82,17 +82,9 @@ function computeStats(closed: AlpacaTrade[]): Stats {
       0
     );
 
-  return {
-    totalTrades: total,
-    winRate,
-    avgWinPct,
-    avgLossPct,
-    expectancy,
-    totalPnlDollars,
-  };
+  return { totalTrades: total, winRate, avgWinPct, avgLossPct, expectancy, totalPnlDollars };
 }
 
-// Group closed trades and compute per-group stats
 function groupStats(
   closed: AlpacaTrade[],
   key: "grade" | "setupType"
@@ -109,10 +101,17 @@ function groupStats(
 }
 
 // =============================================================================
-// SORT TYPES
+// TYPES
 // =============================================================================
 
-type ClosedSortKey = "ticker" | "grade" | "setupType" | "pnlDollars" | "pnlPct" | "closedAt" | "outcome";
+type ClosedSortKey =
+  | "ticker"
+  | "grade"
+  | "setupType"
+  | "pnlDollars"
+  | "pnlPct"
+  | "closedAt"
+  | "outcome";
 
 // =============================================================================
 // STAT CARD
@@ -132,18 +131,21 @@ function StatCard({
   return (
     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--background-surface)] p-4">
       <p className="font-mono text-xs text-[var(--text-muted)]">{label}</p>
-      <p className={cn("font-mono text-lg font-bold tabular-nums text-[var(--text-primary)]", valueClass)}>
+      <p
+        className={cn(
+          "font-mono text-lg font-bold tabular-nums text-[var(--text-primary)]",
+          valueClass
+        )}
+      >
         {value}
       </p>
-      {sub && (
-        <p className="font-mono text-xs text-[var(--text-secondary)]">{sub}</p>
-      )}
+      {sub && <p className="font-mono text-xs text-[var(--text-secondary)]">{sub}</p>}
     </div>
   );
 }
 
 // =============================================================================
-// BREAKDOWN TABLE
+// BREAKDOWN TABLE — always renders with headers; empty state row in tbody
 // =============================================================================
 
 function BreakdownTable({
@@ -158,79 +160,306 @@ function BreakdownTable({
       <h3 className="mb-2 font-mono text-xs font-semibold text-[var(--text-secondary)]">
         {title}
       </h3>
-      {rows.length === 0 ? (
-        <div className="rounded-lg border border-[var(--border-default)] px-4 py-3">
-          <p className="font-sans text-sm text-[var(--text-muted)]">
-            No closed trades yet — data will populate here automatically.
-          </p>
-        </div>
-      ) : null}
-      {rows.length > 0 && <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+      <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
         <table className="w-full">
           <thead>
             <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
-              {["Label", "Trades", "Win Rate", "Avg Win", "Avg Loss", "Expectancy", "P&L"].map((h) => (
-                <th
-                  key={h}
-                  className="px-3 py-2 text-left font-mono text-xs font-medium text-[var(--text-secondary)]"
-                >
-                  {h}
-                </th>
-              ))}
+              {["Label", "Trades", "Win Rate", "Avg Win", "Avg Loss", "Expectancy", "P&L"].map(
+                (h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2 text-left font-mono text-xs font-medium text-[var(--text-secondary)]"
+                  >
+                    {h}
+                  </th>
+                )
+              )}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr
-                key={r.label}
-                className="border-b border-[var(--border-default)] last:border-0"
-              >
-                <td className="px-3 py-2 font-mono text-xs font-medium text-[var(--text-primary)]">
-                  {r.label}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                  {r.totalTrades}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums">
-                  <span
-                    className={
-                      r.winRate >= 0.5 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                    }
-                  >
-                    {(r.winRate * 100).toFixed(0)}%
-                  </span>
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums text-[#00D084]">
-                  {r.avgWinPct > 0 ? `+${r.avgWinPct.toFixed(1)}%` : "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums text-[#FF4D6A]">
-                  {r.avgLossPct < 0 ? `${r.avgLossPct.toFixed(1)}%` : "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums">
-                  <span
-                    className={
-                      r.expectancy >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                    }
-                  >
-                    {r.expectancy >= 0 ? "+" : ""}
-                    {r.expectancy.toFixed(2)}%
-                  </span>
-                </td>
-                <td className="px-3 py-2 font-mono text-xs tabular-nums">
-                  <span
-                    className={
-                      r.totalPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                    }
-                  >
-                    {r.totalPnlDollars >= 0 ? "+" : ""}
-                    {formatCurrency(r.totalPnlDollars)}
-                  </span>
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-3 py-3 font-sans text-sm text-[var(--text-muted)]"
+                >
+                  No closed trades yet — data will populate here automatically.
                 </td>
               </tr>
-            ))}
+            ) : (
+              rows.map((r) => (
+                <tr
+                  key={r.label}
+                  className="border-b border-[var(--border-default)] last:border-0"
+                >
+                  <td className="px-3 py-2 font-mono text-xs font-medium text-[var(--text-primary)]">
+                    {r.label}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                    {r.totalTrades}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums">
+                    <span className={r.winRate >= 0.5 ? "text-[#00D084]" : "text-[#FF4D6A]"}>
+                      {(r.winRate * 100).toFixed(0)}%
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums text-[#00D084]">
+                    {r.avgWinPct > 0 ? `+${r.avgWinPct.toFixed(1)}%` : "—"}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums text-[#FF4D6A]">
+                    {r.avgLossPct < 0 ? `${r.avgLossPct.toFixed(1)}%` : "—"}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums">
+                    <span
+                      className={r.expectancy >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
+                    >
+                      {r.expectancy >= 0 ? "+" : ""}
+                      {r.expectancy.toFixed(2)}%
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs tabular-nums">
+                    <span
+                      className={
+                        r.totalPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
+                      }
+                    >
+                      {r.totalPnlDollars >= 0 ? "+" : ""}
+                      {formatCurrency(r.totalPnlDollars)}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
-      </div>}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// CLOSE TRADE MODAL
+// =============================================================================
+
+function CloseTradeModal({
+  trade,
+  onClose,
+  onConfirm,
+  submitting,
+}: {
+  trade: AlpacaTrade;
+  onClose: () => void;
+  onConfirm: (exitPrice: number) => void;
+  submitting: boolean;
+}) {
+  const [price, setPrice] = useState("");
+  const parsed = parseFloat(price);
+  const valid = !isNaN(parsed) && parsed > 0;
+
+  const estPnlDollars = valid
+    ? pnlDollars(trade.entryPrice, parsed, trade.totalShares, trade.direction)
+    : null;
+  const estPnlPct = valid
+    ? pnlPercent(trade.entryPrice, parsed, trade.direction)
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-[var(--border-default)] bg-[var(--background-surface)] p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-mono text-sm font-semibold text-[var(--text-primary)]">
+            Mark Closed — {trade.ticker}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="mb-4 space-y-1">
+          {[
+            ["Direction", trade.direction.toUpperCase(), trade.direction === "long" ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]"],
+            ["Entry Price", formatCurrency(trade.entryPrice), "text-[var(--text-primary)]"],
+            ["Setup", `${trade.setupType} · ${trade.grade}`, "text-[var(--text-primary)]"],
+            ["Shares", String(trade.totalShares), "text-[var(--text-primary)]"],
+          ].map(([label, val, cls]) => (
+            <div key={label} className="flex justify-between font-mono text-xs">
+              <span className="text-[var(--text-secondary)]">{label}</span>
+              <span className={cls}>{val}</span>
+            </div>
+          ))}
+        </div>
+
+        {estPnlDollars != null && estPnlPct != null && (
+          <div className="mb-4 rounded border border-[var(--border-default)] bg-[var(--background-base)] px-3 py-2">
+            <div className="flex justify-between font-mono text-xs">
+              <span className="text-[var(--text-muted)]">Est. P&L</span>
+              <span
+                className={estPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
+              >
+                {estPnlDollars >= 0 ? "+" : ""}
+                {formatCurrency(estPnlDollars)}
+                {" "}
+                ({estPnlPct >= 0 ? "+" : ""}
+                {estPnlPct.toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+        )}
+
+        <label className="mb-1 block font-mono text-xs text-[var(--text-secondary)]">
+          Exit Price
+        </label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="0.00"
+          autoFocus
+          className="mb-4 w-full rounded border border-[var(--border-default)] bg-[var(--background-base)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--signal-neutral)] focus:outline-none"
+        />
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded border border-[var(--border-default)] py-2 font-mono text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => valid && onConfirm(parsed)}
+            disabled={!valid || submitting}
+            className="flex-1 rounded bg-[var(--signal-neutral)] py-2 font-mono text-xs font-medium text-black disabled:opacity-40"
+          >
+            {submitting ? "Closing..." : "Confirm Close"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// TRADE DETAIL MODAL
+// =============================================================================
+
+function TradeDetailModal({
+  trade,
+  onClose,
+}: {
+  trade: AlpacaTrade;
+  onClose: () => void;
+}) {
+  const hasExit = trade.exitPrice != null;
+  const realPnlDollars = hasExit
+    ? pnlDollars(trade.entryPrice, trade.exitPrice!, trade.totalShares, trade.direction)
+    : null;
+  const realPnlPct = hasExit
+    ? pnlPercent(trade.entryPrice, trade.exitPrice!, trade.direction)
+    : null;
+
+  const rows: [string, string][] = [
+    ["Ticker", trade.ticker],
+    ["Direction", trade.direction.toUpperCase()],
+    ["Setup Type", trade.setupType],
+    ["Grade", trade.grade],
+    ["Phase", String(trade.phase)],
+    ["Total Shares", String(trade.totalShares)],
+    ["T1 Qty", String(trade.t1Qty)],
+    ["Phase 2 Qty", String(trade.phase2Qty)],
+    ["Entry Price", formatCurrency(trade.entryPrice)],
+    ["Stop Price", formatCurrency(trade.stopPrice)],
+    ["T1 Price", formatCurrency(trade.t1Price)],
+    ["T2 Price", formatCurrency(trade.t2Price)],
+    ...(hasExit ? [["Exit Price", formatCurrency(trade.exitPrice!)] as [string, string]] : []),
+    ...(realPnlDollars != null
+      ? [
+          [
+            "Realized P&L",
+            `${realPnlDollars >= 0 ? "+" : ""}${formatCurrency(realPnlDollars)} (${realPnlPct! >= 0 ? "+" : ""}${realPnlPct!.toFixed(2)}%)`,
+          ] as [string, string],
+        ]
+      : []),
+    ["Outcome", trade.outcome ?? "—"],
+    ["Hold", holdDuration(trade.submittedAt, trade.closedAt ?? null)],
+    ["Submitted", new Date(trade.submittedAt).toLocaleString()],
+    ...(trade.t1FilledAt
+      ? [["T1 Filled", new Date(trade.t1FilledAt).toLocaleString()] as [string, string]]
+      : []),
+    ...(trade.closedAt
+      ? [["Closed At", new Date(trade.closedAt).toLocaleString()] as [string, string]]
+      : []),
+  ];
+
+  function colorForRow(label: string, value: string) {
+    if (label === "Direction") {
+      return value === "LONG"
+        ? "text-[var(--signal-long)]"
+        : "text-[var(--signal-short)]";
+    }
+    if (label === "Outcome") {
+      return value === "win"
+        ? "text-[#00D084]"
+        : value === "loss"
+        ? "text-[#FF4D6A]"
+        : "text-[var(--text-primary)]";
+    }
+    if (label === "Realized P&L") {
+      return value.startsWith("+") ? "text-[#00D084]" : "text-[#FF4D6A]";
+    }
+    return "text-[var(--text-primary)]";
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-xl border border-[var(--border-default)] bg-[var(--background-surface)] p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-mono text-sm font-semibold text-[var(--text-primary)]">
+            Trade Detail — {trade.ticker}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[28rem] overflow-y-auto">
+          <table className="w-full">
+            <tbody>
+              {rows.map(([label, value]) => (
+                <tr
+                  key={label}
+                  className="border-b border-[var(--border-default)] last:border-0"
+                >
+                  <td className="py-1.5 pr-6 font-mono text-xs text-[var(--text-muted)]">
+                    {label}
+                  </td>
+                  <td className={cn("py-1.5 font-mono text-xs", colorForRow(label, value))}>
+                    {value}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -244,45 +473,101 @@ export function AutoTestingClient() {
   const [positions, setPositions] = useState<AlpacaPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Closed trades sort
   const [sortKey, setSortKey] = useState<ClosedSortKey>("closedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  // Fetch trades + positions on mount
-  useEffect(() => {
-    let cancelled = false;
+  // Mark Closed modal
+  const [closeModalTrade, setCloseModalTrade] = useState<AlpacaTrade | null>(null);
+  const [closeSubmitting, setCloseSubmitting] = useState(false);
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const [tradesRes, positionsRes] = await Promise.all([
-          fetch("/api/alpaca/trades").then((r) => r.json()),
-          fetch("/api/alpaca/positions").then((r) => r.json()),
-        ]);
-        if (cancelled) return;
-        setTrades(tradesRes.trades ?? []);
-        setPositions(positionsRes.positions ?? []);
-      } catch (err) {
-        if (!cancelled) setError(String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
+  // Trade detail modal
+  const [detailTrade, setDetailTrade] = useState<AlpacaTrade | null>(null);
 
-    void load();
-    return () => { cancelled = true; };
+  // Core data fetch — stable reference via useCallback
+  const fetchData = useCallback(async () => {
+    const [tradesRes, positionsRes] = await Promise.all([
+      fetch("/api/alpaca/trades").then((r) => r.json()),
+      fetch("/api/alpaca/positions").then((r) => r.json()),
+    ]);
+    setTrades(tradesRes.trades ?? []);
+    setPositions(positionsRes.positions ?? []);
+    setLastUpdated(new Date());
   }, []);
 
+  // Initial load
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchData()
+      .catch((err) => { if (!cancelled) setError(String(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [fetchData]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    setError(null);
+    try {
+      await fetchData();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function handleCloseTrade(exitPrice: number) {
+    if (!closeModalTrade) return;
+    setCloseSubmitting(true);
+    try {
+      const res = await fetch("/api/alpaca/close-trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tradeId: closeModalTrade.tradeId, exitPrice }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      setCloseModalTrade(null);
+      await fetchData();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setCloseSubmitting(false);
+    }
+  }
+
   // Split open vs closed
-  const openTrades = useMemo(
-    () => trades.filter((t) => t.phase !== "closed"),
+  const openTrades = useMemo(() => trades.filter((t) => t.phase !== "closed"), [trades]);
+  const closedTrades = useMemo(() => trades.filter((t) => t.phase === "closed"), [trades]);
+
+  // Today's activity
+  const todayPrefix = new Date().toISOString().slice(0, 10);
+  const todayTrades = useMemo(
+    () => trades.filter((t) => t.submittedAt.startsWith(todayPrefix)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [trades]
   );
-  const closedTrades = useMemo(
-    () => trades.filter((t) => t.phase === "closed"),
-    [trades]
+  const todayClosed = useMemo(
+    () => todayTrades.filter((t) => t.phase === "closed"),
+    [todayTrades]
+  );
+  const todayPnl = useMemo(
+    () =>
+      todayClosed
+        .filter((t) => t.exitPrice != null)
+        .reduce(
+          (sum, t) =>
+            sum + pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction),
+          0
+        ),
+    [todayClosed]
   );
 
   // Live prices keyed by symbol
@@ -305,36 +590,21 @@ export function AutoTestingClient() {
     copy.sort((a, b) => {
       let av: number | string = 0;
       let bv: number | string = 0;
-
       switch (sortKey) {
-        case "ticker":
-          av = a.ticker; bv = b.ticker; break;
-        case "grade":
-          av = a.grade; bv = b.grade; break;
-        case "setupType":
-          av = a.setupType; bv = b.setupType; break;
-        case "closedAt":
-          av = a.closedAt ?? ""; bv = b.closedAt ?? ""; break;
-        case "outcome":
-          av = a.outcome ?? ""; bv = b.outcome ?? ""; break;
+        case "ticker": av = a.ticker; bv = b.ticker; break;
+        case "grade": av = a.grade; bv = b.grade; break;
+        case "setupType": av = a.setupType; bv = b.setupType; break;
+        case "closedAt": av = a.closedAt ?? ""; bv = b.closedAt ?? ""; break;
+        case "outcome": av = a.outcome ?? ""; bv = b.outcome ?? ""; break;
         case "pnlDollars":
-          av = a.exitPrice != null
-            ? pnlDollars(a.entryPrice, a.exitPrice, a.totalShares, a.direction)
-            : -Infinity;
-          bv = b.exitPrice != null
-            ? pnlDollars(b.entryPrice, b.exitPrice, b.totalShares, b.direction)
-            : -Infinity;
+          av = a.exitPrice != null ? pnlDollars(a.entryPrice, a.exitPrice, a.totalShares, a.direction) : -Infinity;
+          bv = b.exitPrice != null ? pnlDollars(b.entryPrice, b.exitPrice, b.totalShares, b.direction) : -Infinity;
           break;
         case "pnlPct":
-          av = a.exitPrice != null
-            ? pnlPercent(a.entryPrice, a.exitPrice, a.direction)
-            : -Infinity;
-          bv = b.exitPrice != null
-            ? pnlPercent(b.entryPrice, b.exitPrice, b.direction)
-            : -Infinity;
+          av = a.exitPrice != null ? pnlPercent(a.entryPrice, a.exitPrice, a.direction) : -Infinity;
+          bv = b.exitPrice != null ? pnlPercent(b.entryPrice, b.exitPrice, b.direction) : -Infinity;
           break;
       }
-
       if (av < bv) return sortDir === "asc" ? -1 : 1;
       if (av > bv) return sortDir === "asc" ? 1 : -1;
       return 0;
@@ -343,12 +613,8 @@ export function AutoTestingClient() {
   }, [closedTrades, sortKey, sortDir]);
 
   function toggleSort(key: ClosedSortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("desc"); }
   }
 
   function sortIndicator(key: ClosedSortKey) {
@@ -358,6 +624,39 @@ export function AutoTestingClient() {
         {sortDir === "asc" ? "↑" : "↓"}
       </span>
     );
+  }
+
+  function exportCSV() {
+    const headers = [
+      "Ticker", "Direction", "Setup Type", "Grade",
+      "Entry", "Exit", "$ P&L", "% P&L",
+      "Hold", "Outcome", "Submitted", "Closed",
+    ];
+    const rows = sortedClosed.map((t) => {
+      const hasExit = t.exitPrice != null;
+      const rpnlD = hasExit
+        ? pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction).toFixed(2)
+        : "";
+      const rpnlP = hasExit
+        ? pnlPercent(t.entryPrice, t.exitPrice!, t.direction).toFixed(2)
+        : "";
+      return [
+        t.ticker, t.direction, t.setupType, t.grade,
+        t.entryPrice.toFixed(2), hasExit ? t.exitPrice!.toFixed(2) : "",
+        rpnlD, rpnlP,
+        holdDuration(t.submittedAt, t.closedAt ?? null),
+        t.outcome ?? "", t.submittedAt, t.closedAt ?? "",
+      ];
+    });
+    const csv = [headers, ...rows]
+      .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `trades-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const thClass =
@@ -371,16 +670,43 @@ export function AutoTestingClient() {
 
   return (
     <div className="min-h-screen bg-[var(--background-base)] p-4">
-      <div className="mx-auto max-w-6xl space-y-8">
+      {/* Modals */}
+      {closeModalTrade && (
+        <CloseTradeModal
+          trade={closeModalTrade}
+          onClose={() => setCloseModalTrade(null)}
+          onConfirm={handleCloseTrade}
+          submitting={closeSubmitting}
+        />
+      )}
+      {detailTrade && (
+        <TradeDetailModal trade={detailTrade} onClose={() => setDetailTrade(null)} />
+      )}
 
+      <div className="mx-auto max-w-6xl space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="font-mono text-2xl font-bold text-[var(--text-primary)]">
             Swing Auto Testing
           </h1>
-          <span className="font-mono text-xs text-[var(--text-muted)]">
-            Paper trading · $100k account · 1% risk/trade
-          </span>
+          <div className="flex items-center gap-3">
+            {lastUpdated && (
+              <span className="font-mono text-xs text-[var(--text-muted)]">
+                Updated {lastUpdated.toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="flex items-center gap-1.5 rounded border border-[var(--border-default)] px-2 py-1 font-mono text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
+            >
+              <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <span className="font-mono text-xs text-[var(--text-muted)]">
+              Paper · $100k · 1% risk
+            </span>
+          </div>
         </div>
 
         {/* Error banner */}
@@ -404,9 +730,9 @@ export function AutoTestingClient() {
 
         {!loading && (
           <>
-            {/* ---------------------------------------------------------------- */}
-            {/* AGGREGATE STATS                                                  */}
-            {/* ---------------------------------------------------------------- */}
+            {/* -------------------------------------------------------------- */}
+            {/* AGGREGATE STATS                                                 */}
+            {/* -------------------------------------------------------------- */}
             <section>
               <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
                 AGGREGATE STATS
@@ -424,26 +750,16 @@ export function AutoTestingClient() {
                       ? `${(stats.winRate * 100).toFixed(0)}%`
                       : "—"
                   }
-                  valueClass={
-                    stats.winRate >= 0.5 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                  }
+                  valueClass={stats.winRate >= 0.5 ? "text-[#00D084]" : "text-[#FF4D6A]"}
                 />
                 <StatCard
                   label="Avg Win"
-                  value={
-                    stats.avgWinPct > 0
-                      ? `+${stats.avgWinPct.toFixed(1)}%`
-                      : "—"
-                  }
+                  value={stats.avgWinPct > 0 ? `+${stats.avgWinPct.toFixed(1)}%` : "—"}
                   valueClass="text-[#00D084]"
                 />
                 <StatCard
                   label="Avg Loss"
-                  value={
-                    stats.avgLossPct < 0
-                      ? `${stats.avgLossPct.toFixed(1)}%`
-                      : "—"
-                  }
+                  value={stats.avgLossPct < 0 ? `${stats.avgLossPct.toFixed(1)}%` : "—"}
                   valueClass="text-[#FF4D6A]"
                 />
                 <StatCard
@@ -454,9 +770,7 @@ export function AutoTestingClient() {
                       : "—"
                   }
                   sub="per trade"
-                  valueClass={
-                    stats.expectancy >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                  }
+                  valueClass={stats.expectancy >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
                 />
                 <StatCard
                   label="Total P&L"
@@ -471,16 +785,56 @@ export function AutoTestingClient() {
                 />
               </div>
 
-              {/* Breakdown tables — always rendered; empty state shown when no closed trades */}
               <div className="mt-6 grid gap-6 md:grid-cols-2">
                 <BreakdownTable rows={gradeRows} title="BY GRADE" />
                 <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
               </div>
             </section>
 
-            {/* ---------------------------------------------------------------- */}
-            {/* OPEN POSITIONS                                                   */}
-            {/* ---------------------------------------------------------------- */}
+            {/* -------------------------------------------------------------- */}
+            {/* TODAY'S ACTIVITY                                                */}
+            {/* -------------------------------------------------------------- */}
+            <section>
+              <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                TODAY&apos;S ACTIVITY
+              </h2>
+              {todayTrades.length === 0 ? (
+                <p className="font-sans text-sm text-[var(--text-muted)]">
+                  No setups submitted today.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <StatCard
+                    label="Setups Today"
+                    value={String(todayTrades.length)}
+                  />
+                  <StatCard
+                    label="Still Open"
+                    value={String(
+                      todayTrades.filter((t) => t.phase !== "closed").length
+                    )}
+                  />
+                  <StatCard
+                    label="Closed Today"
+                    value={String(todayClosed.length)}
+                    sub={`${todayClosed.filter((t) => t.outcome === "win").length}W / ${todayClosed.filter((t) => t.outcome === "loss").length}L`}
+                  />
+                  <StatCard
+                    label="Today P&L"
+                    value={
+                      todayClosed.length > 0
+                        ? `${todayPnl >= 0 ? "+" : ""}${formatCurrency(todayPnl)}`
+                        : "—"
+                    }
+                    valueClass={todayPnl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
+                  />
+                </div>
+              )}
+            </section>
+
+            {/* -------------------------------------------------------------- */}
+            {/* OPEN POSITIONS                                                  */}
+            {/* -------------------------------------------------------------- */}
             <section>
               <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
                 OPEN POSITIONS
@@ -501,9 +855,9 @@ export function AutoTestingClient() {
                         {[
                           "Ticker", "Direction", "Setup Type", "Grade",
                           "Entry Price", "Current Price", "Unreal. P&L ($)",
-                          "Unreal. P&L (%)", "Shares", "Phase",
-                        ].map((h) => (
-                          <th key={h} className={thStaticClass}>{h}</th>
+                          "Unreal. P&L (%)", "Shares", "Phase", "",
+                        ].map((h, i) => (
+                          <th key={i} className={thStaticClass}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -523,11 +877,12 @@ export function AutoTestingClient() {
                           <tr
                             key={t.tradeId}
                             className={cn(
-                              "border-b border-[var(--border-default)] last:border-0",
+                              "cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]",
                               t.direction === "long"
                                 ? "border-l-[3px] border-l-[var(--signal-long-muted)]"
                                 : "border-l-[3px] border-l-[var(--signal-short-muted)]"
                             )}
+                            onClick={() => setDetailTrade(t)}
                           >
                             <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">
                               {t.ticker}
@@ -603,6 +958,17 @@ export function AutoTestingClient() {
                                 Phase {t.phase}
                               </span>
                             </td>
+                            <td
+                              className="px-4 py-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => setCloseModalTrade(t)}
+                                className="rounded border border-[var(--border-default)] px-2 py-0.5 font-mono text-xs text-[var(--text-secondary)] hover:border-[var(--signal-short)] hover:text-[var(--signal-short)]"
+                              >
+                                Close
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -612,16 +978,27 @@ export function AutoTestingClient() {
               )}
             </section>
 
-            {/* ---------------------------------------------------------------- */}
-            {/* CLOSED TRADES                                                    */}
-            {/* ---------------------------------------------------------------- */}
+            {/* -------------------------------------------------------------- */}
+            {/* CLOSED TRADES                                                   */}
+            {/* -------------------------------------------------------------- */}
             <section>
-              <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
-                CLOSED TRADES
-                <span className="ml-2 font-normal text-[var(--text-muted)]">
-                  ({closedTrades.length})
-                </span>
-              </h2>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                  CLOSED TRADES
+                  <span className="ml-2 font-normal text-[var(--text-muted)]">
+                    ({closedTrades.length})
+                  </span>
+                </h2>
+                {closedTrades.length > 0 && (
+                  <button
+                    onClick={exportCSV}
+                    className="flex items-center gap-1.5 rounded border border-[var(--border-default)] px-2 py-1 font-mono text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    <Download size={12} />
+                    Export CSV
+                  </button>
+                )}
+              </div>
 
               {closedTrades.length === 0 ? (
                 <p className="font-sans text-sm text-[var(--text-muted)]">
@@ -632,44 +1009,26 @@ export function AutoTestingClient() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("ticker")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("ticker")}>
                           Ticker{sortIndicator("ticker")}
                         </th>
                         <th className={thStaticClass}>Direction</th>
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("setupType")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("setupType")}>
                           Setup Type{sortIndicator("setupType")}
                         </th>
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("grade")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("grade")}>
                           Grade{sortIndicator("grade")}
                         </th>
                         <th className={thStaticClass}>Entry</th>
                         <th className={thStaticClass}>Exit</th>
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("pnlDollars")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("pnlDollars")}>
                           $ P&L{sortIndicator("pnlDollars")}
                         </th>
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("pnlPct")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("pnlPct")}>
                           % P&L{sortIndicator("pnlPct")}
                         </th>
                         <th className={thStaticClass}>Hold</th>
-                        <th
-                          className={thClass}
-                          onClick={() => toggleSort("outcome")}
-                        >
+                        <th className={thClass} onClick={() => toggleSort("outcome")}>
                           Outcome{sortIndicator("outcome")}
                         </th>
                       </tr>
@@ -678,7 +1037,12 @@ export function AutoTestingClient() {
                       {sortedClosed.map((t) => {
                         const hasExit = t.exitPrice != null;
                         const realizedPnlDollars = hasExit
-                          ? pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction)
+                          ? pnlDollars(
+                              t.entryPrice,
+                              t.exitPrice!,
+                              t.totalShares,
+                              t.direction
+                            )
                           : null;
                         const realizedPnlPct = hasExit
                           ? pnlPercent(t.entryPrice, t.exitPrice!, t.direction)
@@ -688,11 +1052,12 @@ export function AutoTestingClient() {
                           <tr
                             key={t.tradeId}
                             className={cn(
-                              "border-b border-[var(--border-default)] last:border-0",
+                              "cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]",
                               t.direction === "long"
                                 ? "border-l-[3px] border-l-[var(--signal-long-muted)]"
                                 : "border-l-[3px] border-l-[var(--signal-short-muted)]"
                             )}
+                            onClick={() => setDetailTrade(t)}
                           >
                             <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">
                               {t.ticker}
@@ -729,7 +1094,9 @@ export function AutoTestingClient() {
                               {realizedPnlDollars != null ? (
                                 <span
                                   className={
-                                    realizedPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
+                                    realizedPnlDollars >= 0
+                                      ? "text-[#00D084]"
+                                      : "text-[#FF4D6A]"
                                   }
                                 >
                                   {realizedPnlDollars >= 0 ? "+" : ""}
@@ -754,7 +1121,7 @@ export function AutoTestingClient() {
                               )}
                             </td>
                             <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                              {holdDuration(t.submittedAt, t.closedAt)}
+                              {holdDuration(t.submittedAt, t.closedAt ?? null)}
                             </td>
                             <td className="px-4 py-2">
                               <span
