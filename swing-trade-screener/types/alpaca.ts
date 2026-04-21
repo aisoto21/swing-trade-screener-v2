@@ -15,14 +15,16 @@ export interface AlpacaTrade {
   totalShares: number;
   t1Qty: number;
   phase2Qty: number;
-  primaryOrderId: string; // entry limit order (OTO parent)
-  t1OrderId: string;      // separate T1 limit order
+  primaryOrderId: string;  // bracket entry order ID
+  t1OrderId: string;       // bracket order ID (take_profit internal) or standalone T1 order
+  phase2OrderId?: string;  // OCO order ID for phase 2 (T2 limit + 2% trailing stop)
   phase: 1 | 2 | "closed";
-  submittedAt: string;    // ISO timestamp
+  submittedAt: string;     // ISO timestamp
   t1FilledAt: string | null;
   closedAt: string | null;
   outcome: "win" | "loss" | "open" | null;
-  exitPrice?: number; // filled_avg_price from trailing stop order when closed
+  exitPrice?: number;
+  exitReason?: "stop_loss" | "t1" | "t2" | "trailing_stop" | null;
 }
 
 // Alpaca REST API response shapes (paper-api.alpaca.markets)

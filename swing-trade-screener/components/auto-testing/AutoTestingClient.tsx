@@ -101,6 +101,42 @@ function groupStats(
 }
 
 // =============================================================================
+// EXIT DISTRIBUTION
+// =============================================================================
+
+interface ExitDistribution {
+  total: number;
+  t2: number;
+  t1: number;
+  trailingStop: number;
+  stopLoss: number;
+}
+
+function computeExitDistribution(closed: AlpacaTrade[]): ExitDistribution {
+  const withReason = closed.filter((t) => t.exitReason != null);
+  const total = withReason.length;
+  return {
+    total,
+    t2: withReason.filter((t) => t.exitReason === "t2").length,
+    t1: withReason.filter((t) => t.exitReason === "t1").length,
+    trailingStop: withReason.filter((t) => t.exitReason === "trailing_stop").length,
+    stopLoss: withReason.filter((t) => t.exitReason === "stop_loss").length,
+  };
+}
+
+function ExitBadge({ reason }: { reason: AlpacaTrade["exitReason"] }) {
+  if (!reason) return <span className="text-[var(--text-muted)]">—</span>;
+  const config: Record<string, { label: string; cls: string }> = {
+    t2:            { label: "T2",    cls: "text-[#00D084]" },
+    t1:            { label: "T1",    cls: "text-[#4dde9e]" },
+    trailing_stop: { label: "Trail", cls: "text-[#F5A623]" },
+    stop_loss:     { label: "Stop",  cls: "text-[#FF4D6A]" },
+  };
+  const c = config[reason] ?? { label: reason, cls: "text-[var(--text-primary)]" };
+  return <span className={cn("font-mono text-xs font-medium", c.cls)}>{c.label}</span>;
+}
+
+// =============================================================================
 // TYPES
 // =============================================================================
 
@@ -111,7 +147,8 @@ type ClosedSortKey =
   | "pnlDollars"
   | "pnlPct"
   | "closedAt"
-  | "outcome";
+  | "outcome"
+  | "exitReason";
 
 // =============================================================================
 // STAT CARD
@@ -391,6 +428,7 @@ function TradeDetailModal({
         ]
       : []),
     ["Outcome", trade.outcome ?? "—"],
+    ["Exit Reason", trade.exitReason ?? "—"],
     ["Hold", holdDuration(trade.submittedAt, trade.closedAt ?? null)],
     ["Submitted", new Date(trade.submittedAt).toLocaleString()],
     ...(trade.t1FilledAt
@@ -413,6 +451,12 @@ function TradeDetailModal({
         : value === "loss"
         ? "text-[#FF4D6A]"
         : "text-[var(--text-primary)]";
+    }
+    if (label === "Exit Reason") {
+      if (value === "t2") return "text-[#00D084]";
+      if (value === "t1") return "text-[#4dde9e]";
+      if (value === "trailing_stop") return "text-[#F5A623]";
+      if (value === "stop_loss") return "text-[#FF4D6A]";
     }
     if (label === "Realized P&L") {
       return value.startsWith("+") ? "text-[#00D084]" : "text-[#FF4D6A]";
@@ -583,6 +627,7 @@ export function AutoTestingClient() {
   const stats = useMemo(() => computeStats(closedTrades), [closedTrades]);
   const gradeRows = useMemo(() => groupStats(closedTrades, "grade"), [closedTrades]);
   const setupRows = useMemo(() => groupStats(closedTrades, "setupType"), [closedTrades]);
+  const exitDist = useMemo(() => computeExitDistribution(closedTrades), [closedTrades]);
 
   // Sorted closed trades
   const sortedClosed = useMemo(() => {
@@ -604,6 +649,7 @@ export function AutoTestingClient() {
           av = a.exitPrice != null ? pnlPercent(a.entryPrice, a.exitPrice, a.direction) : -Infinity;
           bv = b.exitPrice != null ? pnlPercent(b.entryPrice, b.exitPrice, b.direction) : -Infinity;
           break;
+        case "exitReason": av = a.exitReason ?? ""; bv = b.exitReason ?? ""; break;
       }
       if (av < bv) return sortDir === "asc" ? -1 : 1;
       if (av > bv) return sortDir === "asc" ? 1 : -1;
@@ -630,7 +676,7 @@ export function AutoTestingClient() {
     const headers = [
       "Ticker", "Direction", "Setup Type", "Grade",
       "Entry", "Exit", "$ P&L", "% P&L",
-      "Hold", "Outcome", "Submitted", "Closed",
+      "Hold", "Outcome", "Exit Reason", "Submitted", "Closed",
     ];
     const rows = sortedClosed.map((t) => {
       const hasExit = t.exitPrice != null;
@@ -645,7 +691,7 @@ export function AutoTestingClient() {
         t.entryPrice.toFixed(2), hasExit ? t.exitPrice!.toFixed(2) : "",
         rpnlD, rpnlP,
         holdDuration(t.submittedAt, t.closedAt ?? null),
-        t.outcome ?? "", t.submittedAt, t.closedAt ?? "",
+        t.outcome ?? "", t.exitReason ?? "", t.submittedAt, t.closedAt ?? "",
       ];
     });
     const csv = [headers, ...rows]
@@ -788,6 +834,45 @@ export function AutoTestingClient() {
               <div className="mt-6 grid gap-6 md:grid-cols-2">
                 <BreakdownTable rows={gradeRows} title="BY GRADE" />
                 <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
+              </div>
+
+              {/* Exit Distribution */}
+              <div className="mt-6">
+                <h3 className="mb-2 font-mono text-xs font-semibold text-[var(--text-secondary)]">
+                  EXIT DISTRIBUTION
+                </h3>
+                {exitDist.total === 0 ? (
+                  <p className="font-sans text-sm text-[var(--text-muted)]">
+                    No closed trades with exit data yet.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {[
+                      { label: "T2 (Full Target)", count: exitDist.t2, color: "#00D084" },
+                      { label: "T1 (Partial)",     count: exitDist.t1, color: "#4dde9e" },
+                      { label: "Trail Stop",        count: exitDist.trailingStop, color: "#F5A623" },
+                      { label: "Stop Loss",         count: exitDist.stopLoss, color: "#FF4D6A" },
+                    ].map(({ label, count, color }) => (
+                      <div
+                        key={label}
+                        className="rounded-lg border border-[var(--border-default)] bg-[var(--background-surface)] p-3"
+                      >
+                        <p className="font-mono text-xs text-[var(--text-muted)]">{label}</p>
+                        <p
+                          className="font-mono text-lg font-bold tabular-nums"
+                          style={{ color }}
+                        >
+                          {count}
+                        </p>
+                        <p className="font-mono text-xs text-[var(--text-secondary)]">
+                          {exitDist.total > 0
+                            ? `${((count / exitDist.total) * 100).toFixed(0)}%`
+                            : "—"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
 
@@ -1031,6 +1116,9 @@ export function AutoTestingClient() {
                         <th className={thClass} onClick={() => toggleSort("outcome")}>
                           Outcome{sortIndicator("outcome")}
                         </th>
+                        <th className={thClass} onClick={() => toggleSort("exitReason")}>
+                          Exit{sortIndicator("exitReason")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1140,6 +1228,9 @@ export function AutoTestingClient() {
                                   ? "Loss"
                                   : "—"}
                               </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <ExitBadge reason={t.exitReason} />
                             </td>
                           </tr>
                         );

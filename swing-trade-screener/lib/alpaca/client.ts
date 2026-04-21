@@ -82,3 +82,16 @@ export async function getPositions(): Promise<AlpacaPosition[]> {
 export async function getAccount(): Promise<AlpacaAccount> {
   return alpacaFetch<AlpacaAccount>("/v2/account");
 }
+
+export interface AlpacaAsset {
+  id: string;
+  symbol: string;
+  status: string;    // "active" | "inactive"
+  tradable: boolean;
+  shortable: boolean;
+}
+
+// Check if an asset is active and tradable on Alpaca.
+export async function getAsset(symbol: string): Promise<AlpacaAsset> {
+  return alpacaFetch<AlpacaAsset>(`/v2/assets/${symbol}`);
+}

@@ -1,19 +1,23 @@
 // =============================================================================
 // POST /api/alpaca/submit-trade
 // Receives a ScreenerResult, calculates position sizing, deduplicates,
-// and submits a single bracket order (entry limit + stop loss + T1 take profit).
+// and submits a bracket order for t1Qty shares (entry limit + stop loss + T1).
+// After T1 fills, the cron submits an OCO for the remaining phase2Qty shares.
 //
 // Fixes applied:
 //   1. MAX_NOTIONAL cap prevents absurdly large positions from tight stops
-//   2. Bracket order replaces OTO + separate T1 — avoids "held for orders" block
-//   3. "cannot be sold short" caught as a skip, not an error
+//   2. Bracket for t1Qty (not totalShares) — leaves phase2Qty for OCO after T1
+//   3. "cannot be sold short" / untradeable caught as a skip (422)
 //   4. Dedup checks ticker only (any direction) to prevent long/short conflict
+//   5. Asset tradability pre-check — skips delisted / inactive symbols
+//   6. T1 price direction validation — skips inverted targets
+//   7. Full bracket payload + response logged for diagnostics
 // =============================================================================
 
 import { NextRequest } from "next/server";
 import type { ScreenerResult } from "@/types";
 import type { AlpacaTrade } from "@/types/alpaca";
-import { submitOrder } from "@/lib/alpaca/client";
+import { submitOrder, getAsset } from "@/lib/alpaca/client";
 import { addTrade, alreadySubmittedToday } from "@/lib/alpaca/trades";
 
 const RISK_DOLLARS = 1000;  // 1% of $100k account
@@ -49,6 +53,22 @@ export async function POST(req: NextRequest) {
     const t1Price = tradeParams.targets.t1.price;
     const t2Price = tradeParams.targets.t2.price;
 
+    // ISSUE 3: Asset tradability pre-check — prevents 404/422 on inactive symbols
+    try {
+      const asset = await getAsset(ticker);
+      if (!asset.tradable || asset.status !== "active") {
+        console.warn(
+          `[alpaca] [${timestamp}] Skipping ${ticker} — not tradeable on Alpaca (tradable=${asset.tradable}, status=${asset.status})`
+        );
+        return Response.json({ skipped: true, reason: "Not tradeable on Alpaca", ticker });
+      }
+    } catch (assetErr) {
+      // 404 = symbol not found on Alpaca — skip gracefully
+      const assetMsg = assetErr instanceof Error ? assetErr.message : String(assetErr);
+      console.warn(`[alpaca] [${timestamp}] Skipping ${ticker} — asset check failed: ${assetMsg}`);
+      return Response.json({ skipped: true, reason: "Asset check failed", ticker });
+    }
+
     // Validate stop distance (catches inverted stops and zero-distance setups)
     const stopDistance =
       direction === "long"
@@ -60,6 +80,22 @@ export async function POST(req: NextRequest) {
         `[alpaca] [${timestamp}] Skipping ${ticker} — invalid stop distance: entry=${entryPrice} stop=${stopPrice}`
       );
       return Response.json({ skipped: true, reason: "Invalid stop distance", ticker });
+    }
+
+    // ISSUE 1: Validate T1 price direction
+    // Long bracket: take_profit must be ABOVE entry (sell higher = profit)
+    // Short bracket: take_profit must be BELOW entry (buy lower = profit)
+    if (direction === "long" && t1Price <= entryPrice) {
+      console.warn(
+        `[alpaca] [${timestamp}] Skipping ${ticker} — invalid T1 for long: t1=${t1Price} <= entry=${entryPrice}`
+      );
+      return Response.json({ skipped: true, reason: "Invalid T1 price (long)", ticker });
+    }
+    if (direction === "short" && t1Price >= entryPrice) {
+      console.warn(
+        `[alpaca] [${timestamp}] Skipping ${ticker} — invalid T1 for short: t1=${t1Price} >= entry=${entryPrice}`
+      );
+      return Response.json({ skipped: true, reason: "Invalid T1 price (short)", ticker });
     }
 
     // Dedup: ticker only — prevents submitting both long and short on same symbol
@@ -80,16 +116,18 @@ export async function POST(req: NextRequest) {
       return Response.json({ skipped: true, reason: "0 shares calculated", ticker });
     }
 
-    const t1Qty = Math.floor(totalShares / 2);
+    const t1Qty = Math.max(Math.floor(totalShares / 2), 1); // at least 1 share
     const phase2Qty = totalShares - t1Qty;
 
-    // Submit single bracket order: entry limit + stop loss + T1 take profit.
-    // Bracket keeps all legs atomic — no "held for orders" conflict with a
-    // separate T1 sell, which was the failure mode of the prior OTO approach.
+    // Submit bracket for t1Qty shares: entry limit + stop loss + T1 take profit.
+    // Bracket legs' sides are automatic — Alpaca infers them from the entry side:
+    //   Long buy bracket:  stop_loss = sell (below entry), take_profit = sell (above entry)
+    //   Short sell bracket: stop_loss = buy (above entry), take_profit = buy (below entry)
+    // After T1 fills, the cron detects it and submits an OCO for phase2Qty shares.
     const entrySide = direction === "long" ? "buy" : "sell";
     const bracketBody: Record<string, unknown> = {
       symbol: ticker,
-      qty: String(totalShares),
+      qty: String(t1Qty),
       side: entrySide,
       type: "limit",
       limit_price: String(entryPrice.toFixed(2)),
@@ -103,7 +141,17 @@ export async function POST(req: NextRequest) {
       },
     };
 
+    // ISSUE 1: Log full payload before submission so failures are visible in Vercel logs
+    console.log(
+      `[alpaca] [${timestamp}] Bracket payload for ${ticker}: ${JSON.stringify(bracketBody)}`
+    );
+
     const bracketOrder = await submitOrder(bracketBody);
+
+    // ISSUE 1: Log full response for T1/stop_loss leg diagnostics
+    console.log(
+      `[alpaca] [${timestamp}] Bracket response for ${ticker}: ${JSON.stringify(bracketOrder)}`
+    );
 
     const trade: AlpacaTrade = {
       tradeId: crypto.randomUUID(),
@@ -119,18 +167,19 @@ export async function POST(req: NextRequest) {
       t1Qty,
       phase2Qty,
       primaryOrderId: bracketOrder.id,
-      t1OrderId: bracketOrder.id, // bracket handles T1 internally
+      t1OrderId: bracketOrder.id, // bracket handles T1 internally via take_profit leg
       phase: 1,
       submittedAt: timestamp,
       t1FilledAt: null,
       closedAt: null,
       outcome: "open",
+      exitReason: null,
     };
 
     await addTrade(trade);
 
     console.log(
-      `[alpaca] [${timestamp}] Submitted ${direction.toUpperCase()} ${ticker} — ${totalShares} shares @ ${entryPrice.toFixed(2)} | stop ${stopPrice.toFixed(2)} | T1 ${t1Price.toFixed(2)} [bracket]`
+      `[alpaca] [${timestamp}] Submitted ${direction.toUpperCase()} ${ticker} — t1Qty=${t1Qty} phase2Qty=${phase2Qty} @ ${entryPrice.toFixed(2)} | stop ${stopPrice.toFixed(2)} | T1 ${t1Price.toFixed(2)} | T2 ${t2Price.toFixed(2)} [bracket]`
     );
 
     return Response.json({ success: true, tradeId: trade.tradeId, ticker });
