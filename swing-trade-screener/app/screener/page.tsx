@@ -115,7 +115,7 @@ export default function ScreenerPage() {
         void fetch("/api/alpaca/submit-trade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ result }),
+          body: JSON.stringify({ result, marketRegime: regime?.regime ?? null }),
         }).catch(() => {
           // Errors are logged server-side; never block the UI
         });

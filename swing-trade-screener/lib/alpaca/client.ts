@@ -9,6 +9,7 @@ import type {
   AlpacaOrderResponse,
   AlpacaPosition,
   AlpacaAccount,
+  AlpacaClock,
 } from "@/types/alpaca";
 
 function getBaseUrl(): string {
@@ -78,9 +79,26 @@ export async function getPositions(): Promise<AlpacaPosition[]> {
   return res.json() as Promise<AlpacaPosition[]>;
 }
 
+// Fetch a single position by symbol. Returns null if no position exists (404).
+export async function getPosition(symbol: string): Promise<AlpacaPosition | null> {
+  const url = `${getBaseUrl()}/v2/positions/${symbol}`;
+  const res = await fetch(url, { headers: getHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Alpaca API ${res.status}: ${body}`);
+  }
+  return res.json() as Promise<AlpacaPosition>;
+}
+
 // Fetch account info.
 export async function getAccount(): Promise<AlpacaAccount> {
   return alpacaFetch<AlpacaAccount>("/v2/account");
+}
+
+// Fetch market clock — is_open, next_open, next_close.
+export async function getClock(): Promise<AlpacaClock> {
+  return alpacaFetch<AlpacaClock>("/v2/clock");
 }
 
 export interface AlpacaAsset {

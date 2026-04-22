@@ -65,7 +65,7 @@ export async function POST() {
         side: t1Side,
         type: "limit",
         limit_price: String(trade.t1Price.toFixed(2)),
-        time_in_force: "day",
+        time_in_force: "gtc",
       };
 
       try {

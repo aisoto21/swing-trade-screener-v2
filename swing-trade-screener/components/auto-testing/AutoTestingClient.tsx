@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { RefreshCw, X, Download } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { formatCurrency } from "@/lib/utils/formatter";
-import type { AlpacaTrade, AlpacaPosition } from "@/types/alpaca";
+import type { AlpacaTrade, AlpacaPosition, DailySnapshot } from "@/types/alpaca";
 
 // =============================================================================
 // HELPERS
@@ -36,6 +36,10 @@ function pnlDollars(
     : (entry - exit) * shares;
 }
 
+function fmtPct(n: number): string {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+}
+
 // =============================================================================
 // AGGREGATE STATS
 // =============================================================================
@@ -60,11 +64,11 @@ function computeStats(closed: AlpacaTrade[]): Stats {
 
   const winPcts = wins
     .filter((t) => t.exitPrice != null)
-    .map((t) => pnlPercent(t.entryPrice, t.exitPrice!, t.direction));
+    .map((t) => pnlPercent(t.filledEntryPrice ?? t.entryPrice, t.exitPrice!, t.direction));
 
   const lossPcts = losses
     .filter((t) => t.exitPrice != null)
-    .map((t) => pnlPercent(t.entryPrice, t.exitPrice!, t.direction));
+    .map((t) => pnlPercent(t.filledEntryPrice ?? t.entryPrice, t.exitPrice!, t.direction));
 
   const avgWinPct =
     winPcts.length > 0 ? winPcts.reduce((a, b) => a + b, 0) / winPcts.length : 0;
@@ -78,7 +82,12 @@ function computeStats(closed: AlpacaTrade[]): Stats {
   const totalPnlDollars = closed
     .filter((t) => t.exitPrice != null)
     .reduce(
-      (sum, t) => sum + pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction),
+      (sum, t) => sum + pnlDollars(
+        t.filledEntryPrice ?? t.entryPrice,
+        t.exitPrice!,
+        t.filledQty ?? t.totalShares,
+        t.direction
+      ),
       0
     );
 
@@ -87,11 +96,11 @@ function computeStats(closed: AlpacaTrade[]): Stats {
 
 function groupStats(
   closed: AlpacaTrade[],
-  key: "grade" | "setupType"
+  key: "grade" | "setupType" | "marketRegime"
 ): Array<{ label: string } & Stats> {
   const groups: Record<string, AlpacaTrade[]> = {};
   for (const t of closed) {
-    const k = t[key];
+    const k = key === "marketRegime" ? (t.marketRegime ?? "unknown") : t[key];
     if (!groups[k]) groups[k] = [];
     groups[k].push(t);
   }
@@ -182,7 +191,7 @@ function StatCard({
 }
 
 // =============================================================================
-// BREAKDOWN TABLE — always renders with headers; empty state row in tbody
+// BREAKDOWN TABLE
 // =============================================================================
 
 function BreakdownTable({
@@ -293,11 +302,14 @@ function CloseTradeModal({
   const parsed = parseFloat(price);
   const valid = !isNaN(parsed) && parsed > 0;
 
+  const entryForCalc = trade.filledEntryPrice ?? trade.entryPrice;
+  const sharesForCalc = trade.filledQty ?? trade.totalShares;
+
   const estPnlDollars = valid
-    ? pnlDollars(trade.entryPrice, parsed, trade.totalShares, trade.direction)
+    ? pnlDollars(entryForCalc, parsed, sharesForCalc, trade.direction)
     : null;
   const estPnlPct = valid
-    ? pnlPercent(trade.entryPrice, parsed, trade.direction)
+    ? pnlPercent(entryForCalc, parsed, trade.direction)
     : null;
 
   return (
@@ -324,9 +336,9 @@ function CloseTradeModal({
         <div className="mb-4 space-y-1">
           {[
             ["Direction", trade.direction.toUpperCase(), trade.direction === "long" ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]"],
-            ["Entry Price", formatCurrency(trade.entryPrice), "text-[var(--text-primary)]"],
+            ["Entry Price", formatCurrency(entryForCalc), "text-[var(--text-primary)]"],
             ["Setup", `${trade.setupType} · ${trade.grade}`, "text-[var(--text-primary)]"],
-            ["Shares", String(trade.totalShares), "text-[var(--text-primary)]"],
+            ["Shares", String(sharesForCalc), "text-[var(--text-primary)]"],
           ].map(([label, val, cls]) => (
             <div key={label} className="flex justify-between font-mono text-xs">
               <span className="text-[var(--text-secondary)]">{label}</span>
@@ -398,11 +410,13 @@ function TradeDetailModal({
   onClose: () => void;
 }) {
   const hasExit = trade.exitPrice != null;
+  const entryForCalc = trade.filledEntryPrice ?? trade.entryPrice;
+  const sharesForCalc = trade.filledQty ?? trade.totalShares;
   const realPnlDollars = hasExit
-    ? pnlDollars(trade.entryPrice, trade.exitPrice!, trade.totalShares, trade.direction)
+    ? pnlDollars(entryForCalc, trade.exitPrice!, sharesForCalc, trade.direction)
     : null;
   const realPnlPct = hasExit
-    ? pnlPercent(trade.entryPrice, trade.exitPrice!, trade.direction)
+    ? pnlPercent(entryForCalc, trade.exitPrice!, trade.direction)
     : null;
 
   const rows: [string, string][] = [
@@ -411,10 +425,14 @@ function TradeDetailModal({
     ["Setup Type", trade.setupType],
     ["Grade", trade.grade],
     ["Phase", String(trade.phase)],
+    ["Status", trade.status ?? "active"],
+    ["Market Regime", trade.marketRegime ?? "—"],
     ["Total Shares", String(trade.totalShares)],
     ["T1 Qty", String(trade.t1Qty)],
     ["Phase 2 Qty", String(trade.phase2Qty)],
     ["Entry Price", formatCurrency(trade.entryPrice)],
+    ...(trade.filledEntryPrice ? [["Filled @ ", formatCurrency(trade.filledEntryPrice)] as [string, string]] : []),
+    ...(trade.slippage != null ? [["Slippage", `${trade.slippage >= 0 ? "+" : ""}$${trade.slippage.toFixed(4)} (${trade.slippageBps}bps)`] as [string, string]] : []),
     ["Stop Price", formatCurrency(trade.stopPrice)],
     ["T1 Price", formatCurrency(trade.t1Price)],
     ["T2 Price", formatCurrency(trade.t2Price)],
@@ -460,6 +478,15 @@ function TradeDetailModal({
     }
     if (label === "Realized P&L") {
       return value.startsWith("+") ? "text-[#00D084]" : "text-[#FF4D6A]";
+    }
+    if (label === "Slippage") {
+      const isNeg = value.startsWith("-");
+      return isNeg ? "text-[#00D084]" : value.includes("+") ? "text-[#FF4D6A]" : "text-[var(--text-primary)]";
+    }
+    if (label === "Market Regime") {
+      if (value === "bull") return "text-[#00D084]";
+      if (value === "bear") return "text-[#FF4D6A]";
+      if (value === "neutral") return "text-[#F5A623]";
     }
     return "text-[var(--text-primary)]";
   }
@@ -515,6 +542,7 @@ function TradeDetailModal({
 export function AutoTestingClient() {
   const [trades, setTrades] = useState<AlpacaTrade[]>([]);
   const [positions, setPositions] = useState<AlpacaPosition[]>([]);
+  const [snapshots, setSnapshots] = useState<DailySnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -533,12 +561,14 @@ export function AutoTestingClient() {
 
   // Core data fetch — stable reference via useCallback
   const fetchData = useCallback(async () => {
-    const [tradesRes, positionsRes] = await Promise.all([
+    const [tradesRes, positionsRes, snapshotsRes] = await Promise.all([
       fetch("/api/alpaca/trades").then((r) => r.json()),
       fetch("/api/alpaca/positions").then((r) => r.json()),
+      fetch("/api/alpaca/snapshots").then((r) => r.json()),
     ]);
     setTrades(tradesRes.trades ?? []);
     setPositions(positionsRes.positions ?? []);
+    setSnapshots(snapshotsRes.snapshots ?? []);
     setLastUpdated(new Date());
   }, []);
 
@@ -587,9 +617,28 @@ export function AutoTestingClient() {
     }
   }
 
-  // Split open vs closed
-  const openTrades = useMemo(() => trades.filter((t) => t.phase !== "closed"), [trades]);
+  // ── derived state ──────────────────────────────────────────────────────────
+
   const closedTrades = useMemo(() => trades.filter((t) => t.phase === "closed"), [trades]);
+  const queuedTrades = useMemo(() => trades.filter((t) => t.status === "queued"), [trades]);
+  const nonClosedTrades = useMemo(() => trades.filter((t) => t.phase !== "closed" && t.status !== "queued"), [trades]);
+
+  // [ISSUE 7] Cross-reference Redis trades vs live Alpaca positions
+  const alpacaSymbols = useMemo(() => new Set(positions.map((p) => p.symbol)), [positions]);
+  const confirmedOpenTrades = useMemo(
+    () => nonClosedTrades.filter((t) => alpacaSymbols.has(t.ticker)),
+    [nonClosedTrades, alpacaSymbols]
+  );
+  const pendingOrderTrades = useMemo(
+    () => nonClosedTrades.filter((t) => !alpacaSymbols.has(t.ticker)),
+    [nonClosedTrades, alpacaSymbols]
+  );
+
+  // [ISSUE 8] Alpaca positions not in Redis → synthetic "alpaca_only" records
+  const alpacaOnlyPositions = useMemo(
+    () => positions.filter((p) => !trades.some((t) => t.ticker === p.symbol && t.phase !== "closed")),
+    [positions, trades]
+  );
 
   // Today's activity
   const todayPrefix = new Date().toISOString().slice(0, 10);
@@ -608,13 +657,18 @@ export function AutoTestingClient() {
         .filter((t) => t.exitPrice != null)
         .reduce(
           (sum, t) =>
-            sum + pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction),
+            sum + pnlDollars(
+              t.filledEntryPrice ?? t.entryPrice,
+              t.exitPrice!,
+              t.filledQty ?? t.totalShares,
+              t.direction
+            ),
           0
         ),
     [todayClosed]
   );
 
-  // Live prices keyed by symbol
+  // Live prices keyed by symbol (from confirmed Alpaca positions)
   const livePriceMap = useMemo(() => {
     const map: Record<string, number> = {};
     for (const p of positions) {
@@ -623,10 +677,25 @@ export function AutoTestingClient() {
     return map;
   }, [positions]);
 
-  // Aggregate stats
+  // Unrealized P&L across confirmed open positions
+  const totalUnrealizedPnl = useMemo(
+    () =>
+      positions.reduce((sum, p) => sum + parseFloat(p.unrealized_pl ?? "0"), 0),
+    [positions]
+  );
+
+  // Average slippage across all trades that have it
+  const avgSlippageBps = useMemo(() => {
+    const withSlippage = trades.filter((t) => t.slippageBps != null);
+    if (withSlippage.length === 0) return null;
+    return withSlippage.reduce((sum, t) => sum + (t.slippageBps ?? 0), 0) / withSlippage.length;
+  }, [trades]);
+
+  // Aggregate stats (closed only)
   const stats = useMemo(() => computeStats(closedTrades), [closedTrades]);
   const gradeRows = useMemo(() => groupStats(closedTrades, "grade"), [closedTrades]);
   const setupRows = useMemo(() => groupStats(closedTrades, "setupType"), [closedTrades]);
+  const regimeRows = useMemo(() => groupStats(closedTrades, "marketRegime"), [closedTrades]);
   const exitDist = useMemo(() => computeExitDistribution(closedTrades), [closedTrades]);
 
   // Sorted closed trades
@@ -641,14 +710,20 @@ export function AutoTestingClient() {
         case "setupType": av = a.setupType; bv = b.setupType; break;
         case "closedAt": av = a.closedAt ?? ""; bv = b.closedAt ?? ""; break;
         case "outcome": av = a.outcome ?? ""; bv = b.outcome ?? ""; break;
-        case "pnlDollars":
-          av = a.exitPrice != null ? pnlDollars(a.entryPrice, a.exitPrice, a.totalShares, a.direction) : -Infinity;
-          bv = b.exitPrice != null ? pnlDollars(b.entryPrice, b.exitPrice, b.totalShares, b.direction) : -Infinity;
+        case "pnlDollars": {
+          const ea = a.filledEntryPrice ?? a.entryPrice;
+          const eb = b.filledEntryPrice ?? b.entryPrice;
+          av = a.exitPrice != null ? pnlDollars(ea, a.exitPrice, a.filledQty ?? a.totalShares, a.direction) : -Infinity;
+          bv = b.exitPrice != null ? pnlDollars(eb, b.exitPrice, b.filledQty ?? b.totalShares, b.direction) : -Infinity;
           break;
-        case "pnlPct":
-          av = a.exitPrice != null ? pnlPercent(a.entryPrice, a.exitPrice, a.direction) : -Infinity;
-          bv = b.exitPrice != null ? pnlPercent(b.entryPrice, b.exitPrice, b.direction) : -Infinity;
+        }
+        case "pnlPct": {
+          const ea = a.filledEntryPrice ?? a.entryPrice;
+          const eb = b.filledEntryPrice ?? b.entryPrice;
+          av = a.exitPrice != null ? pnlPercent(ea, a.exitPrice, a.direction) : -Infinity;
+          bv = b.exitPrice != null ? pnlPercent(eb, b.exitPrice, b.direction) : -Infinity;
           break;
+        }
         case "exitReason": av = a.exitReason ?? ""; bv = b.exitReason ?? ""; break;
       }
       if (av < bv) return sortDir === "asc" ? -1 : 1;
@@ -674,22 +749,21 @@ export function AutoTestingClient() {
 
   function exportCSV() {
     const headers = [
-      "Ticker", "Direction", "Setup Type", "Grade",
-      "Entry", "Exit", "$ P&L", "% P&L",
+      "Ticker", "Direction", "Setup Type", "Grade", "Regime",
+      "Entry", "Filled @", "Exit", "$ P&L", "% P&L", "Slippage (bps)",
       "Hold", "Outcome", "Exit Reason", "Submitted", "Closed",
     ];
     const rows = sortedClosed.map((t) => {
+      const ea = t.filledEntryPrice ?? t.entryPrice;
       const hasExit = t.exitPrice != null;
-      const rpnlD = hasExit
-        ? pnlDollars(t.entryPrice, t.exitPrice!, t.totalShares, t.direction).toFixed(2)
-        : "";
-      const rpnlP = hasExit
-        ? pnlPercent(t.entryPrice, t.exitPrice!, t.direction).toFixed(2)
-        : "";
+      const qty = t.filledQty ?? t.totalShares;
+      const rpnlD = hasExit ? pnlDollars(ea, t.exitPrice!, qty, t.direction).toFixed(2) : "";
+      const rpnlP = hasExit ? pnlPercent(ea, t.exitPrice!, t.direction).toFixed(2) : "";
       return [
-        t.ticker, t.direction, t.setupType, t.grade,
-        t.entryPrice.toFixed(2), hasExit ? t.exitPrice!.toFixed(2) : "",
-        rpnlD, rpnlP,
+        t.ticker, t.direction, t.setupType, t.grade, t.marketRegime ?? "",
+        t.entryPrice.toFixed(2), ea.toFixed(2),
+        hasExit ? t.exitPrice!.toFixed(2) : "",
+        rpnlD, rpnlP, t.slippageBps != null ? String(t.slippageBps) : "",
         holdDuration(t.submittedAt, t.closedAt ?? null),
         t.outcome ?? "", t.exitReason ?? "", t.submittedAt, t.closedAt ?? "",
       ];
@@ -777,17 +851,62 @@ export function AutoTestingClient() {
         {!loading && (
           <>
             {/* -------------------------------------------------------------- */}
-            {/* AGGREGATE STATS                                                 */}
+            {/* ROW 1: PORTFOLIO OVERVIEW                                       */}
             {/* -------------------------------------------------------------- */}
             <section>
               <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
-                AGGREGATE STATS
+                PORTFOLIO OVERVIEW
+              </h2>
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+                <StatCard
+                  label="Open Positions"
+                  value={String(confirmedOpenTrades.length)}
+                  sub={confirmedOpenTrades.length > 0 ? "confirmed on Alpaca" : "none live yet"}
+                />
+                <StatCard
+                  label="Pending Orders"
+                  value={String(pendingOrderTrades.length)}
+                  sub="awaiting fill"
+                />
+                <StatCard
+                  label="Queued Trades"
+                  value={String(queuedTrades.length)}
+                  sub="submits at open"
+                />
+                <StatCard
+                  label="Unreal. P&L"
+                  value={
+                    confirmedOpenTrades.length > 0
+                      ? `${totalUnrealizedPnl >= 0 ? "+" : ""}${formatCurrency(totalUnrealizedPnl)}`
+                      : "—"
+                  }
+                  valueClass={totalUnrealizedPnl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
+                />
+                <StatCard
+                  label="Today P&L"
+                  value={
+                    todayClosed.length > 0
+                      ? `${todayPnl >= 0 ? "+" : ""}${formatCurrency(todayPnl)}`
+                      : "—"
+                  }
+                  sub={`${todayClosed.length} closed today`}
+                  valueClass={todayPnl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
+                />
+              </div>
+            </section>
+
+            {/* -------------------------------------------------------------- */}
+            {/* ROW 2: CLOSED PERFORMANCE                                       */}
+            {/* -------------------------------------------------------------- */}
+            <section>
+              <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                CLOSED PERFORMANCE
               </h2>
               <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
                 <StatCard
-                  label="Total Trades"
+                  label="Total Closed"
                   value={String(stats.totalTrades)}
-                  sub={`${openTrades.length} open`}
+                  sub={`${trades.filter(t => t.phase !== "closed").length} still active`}
                 />
                 <StatCard
                   label="Win Rate"
@@ -819,7 +938,7 @@ export function AutoTestingClient() {
                   valueClass={stats.expectancy >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
                 />
                 <StatCard
-                  label="Total P&L"
+                  label="Total Realized P&L"
                   value={
                     stats.totalTrades > 0
                       ? `${stats.totalPnlDollars >= 0 ? "+" : ""}${formatCurrency(stats.totalPnlDollars)}`
@@ -831,237 +950,268 @@ export function AutoTestingClient() {
                 />
               </div>
 
-              <div className="mt-6 grid gap-6 md:grid-cols-2">
-                <BreakdownTable rows={gradeRows} title="BY GRADE" />
-                <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
-              </div>
-
-              {/* Exit Distribution */}
-              <div className="mt-6">
-                <h3 className="mb-2 font-mono text-xs font-semibold text-[var(--text-secondary)]">
-                  EXIT DISTRIBUTION
-                </h3>
-                {exitDist.total === 0 ? (
-                  <p className="font-sans text-sm text-[var(--text-muted)]">
-                    No closed trades with exit data yet.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                    {[
-                      { label: "T2 (Full Target)", count: exitDist.t2, color: "#00D084" },
-                      { label: "T1 (Partial)",     count: exitDist.t1, color: "#4dde9e" },
-                      { label: "Trail Stop",        count: exitDist.trailingStop, color: "#F5A623" },
-                      { label: "Stop Loss",         count: exitDist.stopLoss, color: "#FF4D6A" },
-                    ].map(({ label, count, color }) => (
-                      <div
-                        key={label}
-                        className="rounded-lg border border-[var(--border-default)] bg-[var(--background-surface)] p-3"
-                      >
-                        <p className="font-mono text-xs text-[var(--text-muted)]">{label}</p>
-                        <p
-                          className="font-mono text-lg font-bold tabular-nums"
-                          style={{ color }}
-                        >
-                          {count}
-                        </p>
-                        <p className="font-mono text-xs text-[var(--text-secondary)]">
-                          {exitDist.total > 0
-                            ? `${((count / exitDist.total) * 100).toFixed(0)}%`
-                            : "—"}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* -------------------------------------------------------------- */}
-            {/* TODAY'S ACTIVITY                                                */}
-            {/* -------------------------------------------------------------- */}
-            <section>
-              <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
-                TODAY&apos;S ACTIVITY
-              </h2>
-              {todayTrades.length === 0 ? (
-                <p className="font-sans text-sm text-[var(--text-muted)]">
-                  No setups submitted today.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <StatCard
-                    label="Setups Today"
-                    value={String(todayTrades.length)}
-                  />
-                  <StatCard
-                    label="Still Open"
-                    value={String(
-                      todayTrades.filter((t) => t.phase !== "closed").length
-                    )}
-                  />
-                  <StatCard
-                    label="Closed Today"
-                    value={String(todayClosed.length)}
-                    sub={`${todayClosed.filter((t) => t.outcome === "win").length}W / ${todayClosed.filter((t) => t.outcome === "loss").length}L`}
-                  />
-                  <StatCard
-                    label="Today P&L"
-                    value={
-                      todayClosed.length > 0
-                        ? `${todayPnl >= 0 ? "+" : ""}${formatCurrency(todayPnl)}`
-                        : "—"
-                    }
-                    valueClass={todayPnl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}
-                  />
+              {/* Slippage summary */}
+              {avgSlippageBps != null && (
+                <div className="mt-3 flex items-center gap-2 rounded border border-[var(--border-default)] bg-[var(--background-surface)] px-4 py-2">
+                  <span className="font-mono text-xs text-[var(--text-muted)]">Avg Entry Slippage:</span>
+                  <span className={cn("font-mono text-xs font-medium", avgSlippageBps > 5 ? "text-[#FF4D6A]" : "text-[var(--text-primary)]")}>
+                    {avgSlippageBps >= 0 ? "+" : ""}{avgSlippageBps.toFixed(1)} bps
+                  </span>
+                  <span className="ml-2 font-mono text-xs text-[var(--text-muted)]">
+                    (negative = favorable fill)
+                  </span>
                 </div>
               )}
             </section>
 
             {/* -------------------------------------------------------------- */}
-            {/* OPEN POSITIONS                                                  */}
+            {/* BREAKDOWN TABLES                                                */}
+            {/* -------------------------------------------------------------- */}
+            <section className="grid gap-6 md:grid-cols-2">
+              <BreakdownTable rows={gradeRows} title="BY GRADE" />
+              <BreakdownTable rows={setupRows} title="BY SETUP TYPE" />
+            </section>
+
+            <section>
+              <BreakdownTable rows={regimeRows} title="BY MARKET REGIME" />
+            </section>
+
+            {/* Exit Distribution */}
+            <section>
+              <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                EXIT DISTRIBUTION
+              </h2>
+              {exitDist.total === 0 ? (
+                <p className="font-sans text-sm text-[var(--text-muted)]">
+                  No closed trades with exit data yet.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {[
+                    { label: "T2 (Full Target)", count: exitDist.t2, color: "#00D084" },
+                    { label: "T1 (Partial)",     count: exitDist.t1, color: "#4dde9e" },
+                    { label: "Trail Stop",        count: exitDist.trailingStop, color: "#F5A623" },
+                    { label: "Stop Loss",         count: exitDist.stopLoss, color: "#FF4D6A" },
+                  ].map(({ label, count, color }) => (
+                    <div
+                      key={label}
+                      className="rounded-lg border border-[var(--border-default)] bg-[var(--background-surface)] p-3"
+                    >
+                      <p className="font-mono text-xs text-[var(--text-muted)]">{label}</p>
+                      <p
+                        className="font-mono text-lg font-bold tabular-nums"
+                        style={{ color }}
+                      >
+                        {count}
+                      </p>
+                      <p className="font-mono text-xs text-[var(--text-secondary)]">
+                        {exitDist.total > 0
+                          ? `${((count / exitDist.total) * 100).toFixed(0)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* -------------------------------------------------------------- */}
+            {/* OPEN POSITIONS (confirmed — Alpaca position exists)             */}
             {/* -------------------------------------------------------------- */}
             <section>
               <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
                 OPEN POSITIONS
                 <span className="ml-2 font-normal text-[var(--text-muted)]">
-                  ({openTrades.length})
+                  ({confirmedOpenTrades.length})
                 </span>
+                <span className="ml-2 font-normal text-[var(--text-muted)] text-xs">confirmed on Alpaca</span>
               </h2>
 
-              {openTrades.length === 0 ? (
+              {confirmedOpenTrades.length === 0 ? (
                 <p className="font-sans text-sm text-[var(--text-muted)]">
-                  No open positions. Run the screener to auto-submit setups.
+                  No confirmed open positions. Run the screener to auto-submit setups.
                 </p>
               ) : (
+                <OpenPositionsTable
+                  trades={confirmedOpenTrades}
+                  livePriceMap={livePriceMap}
+                  onDetail={setDetailTrade}
+                  onClose={setCloseModalTrade}
+                  thStaticClass={thStaticClass}
+                />
+              )}
+
+              {/* Alpaca-only positions (no Redis record) */}
+              {alpacaOnlyPositions.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="mb-2 font-mono text-xs font-semibold text-[#F5A623]">
+                    ⚠ ALPACA-ONLY POSITIONS ({alpacaOnlyPositions.length}) — No Redis Record
+                  </h3>
+                  <div className="overflow-x-auto rounded-lg border border-[#F5A623]/30 bg-[rgba(245,166,35,0.04)]">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
+                          {["Symbol", "Side", "Qty", "Avg Entry", "Current", "Unreal. P&L", "Market Value"].map((h) => (
+                            <th key={h} className={thStaticClass}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {alpacaOnlyPositions.map((p) => {
+                          const pl = parseFloat(p.unrealized_pl);
+                          const plPct = parseFloat(p.unrealized_plpc) * 100;
+                          return (
+                            <tr key={p.symbol} className="border-b border-[var(--border-default)] last:border-0">
+                              <td className="px-4 py-2 font-mono text-sm font-bold text-[#F5A623]">
+                                {p.symbol}
+                                <span className="ml-1 rounded bg-[#F5A623]/10 px-1 py-0.5 font-mono text-xs text-[#F5A623]">
+                                  ⚠ Partial Data
+                                </span>
+                              </td>
+                              <td className="px-4 py-2">
+                                <span className={cn("font-mono text-xs uppercase", p.side === "long" ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]")}>
+                                  {p.side}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 font-mono text-xs tabular-nums">{p.qty}</td>
+                              <td className="px-4 py-2 font-mono text-xs tabular-nums">{formatCurrency(parseFloat(p.avg_entry_price))}</td>
+                              <td className="px-4 py-2 font-mono text-xs tabular-nums">{formatCurrency(parseFloat(p.current_price))}</td>
+                              <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                                <span className={pl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}>
+                                  {pl >= 0 ? "+" : ""}{formatCurrency(pl)} ({fmtPct(plPct)})
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                                {formatCurrency(parseFloat(p.market_value))}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* -------------------------------------------------------------- */}
+            {/* [ISSUE 7] PENDING ORDERS (no Alpaca position yet)               */}
+            {/* -------------------------------------------------------------- */}
+            {pendingOrderTrades.length > 0 && (
+              <section>
+                <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                  PENDING ORDERS
+                  <span className="ml-2 font-normal text-[var(--text-muted)]">
+                    ({pendingOrderTrades.length})
+                  </span>
+                  <span className="ml-2 font-normal text-[var(--text-muted)] text-xs">entry not yet filled</span>
+                </h2>
                 <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
-                        {[
-                          "Ticker", "Direction", "Setup Type", "Grade",
-                          "Entry Price", "Current Price", "Unreal. P&L ($)",
-                          "Unreal. P&L (%)", "Shares", "Phase", "",
-                        ].map((h, i) => (
+                        {["Ticker", "Direction", "Setup", "Grade", "Entry Limit", "Stop", "T1", "T2", "Shares", "Phase", "Submitted", ""].map((h, i) => (
                           <th key={i} className={thStaticClass}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {openTrades.map((t) => {
-                        const livePrice = livePriceMap[t.ticker];
-                        const currentPrice = livePrice ?? t.entryPrice;
-                        const hasPx = livePrice != null;
-                        const uPnlDollars = hasPx
-                          ? pnlDollars(t.entryPrice, currentPrice, t.totalShares, t.direction)
-                          : null;
-                        const uPnlPct = hasPx
-                          ? pnlPercent(t.entryPrice, currentPrice, t.direction)
-                          : null;
-
-                        return (
-                          <tr
-                            key={t.tradeId}
-                            className={cn(
-                              "cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]",
-                              t.direction === "long"
-                                ? "border-l-[3px] border-l-[var(--signal-long-muted)]"
-                                : "border-l-[3px] border-l-[var(--signal-short-muted)]"
-                            )}
-                            onClick={() => setDetailTrade(t)}
-                          >
-                            <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">
-                              {t.ticker}
-                            </td>
-                            <td className="px-4 py-2">
-                              <span
-                                className={cn(
-                                  "font-mono text-xs uppercase",
-                                  t.direction === "long"
-                                    ? "text-[var(--signal-long)]"
-                                    : "text-[var(--signal-short)]"
-                                )}
-                              >
-                                {t.direction}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs text-[var(--text-secondary)]">
-                              {t.setupType}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs font-medium text-[var(--signal-neutral)]">
-                              {t.grade}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                              {formatCurrency(t.entryPrice)}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                              {hasPx ? (
-                                formatCurrency(currentPrice)
-                              ) : (
-                                <span className="text-[var(--text-muted)]">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                              {uPnlDollars != null ? (
-                                <span
-                                  className={
-                                    uPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                                  }
-                                >
-                                  {uPnlDollars >= 0 ? "+" : ""}
-                                  {formatCurrency(uPnlDollars)}
-                                </span>
-                              ) : (
-                                <span className="text-[var(--text-muted)]">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                              {uPnlPct != null ? (
-                                <span
-                                  className={
-                                    uPnlPct >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
-                                  }
-                                >
-                                  {uPnlPct >= 0 ? "+" : ""}
-                                  {uPnlPct.toFixed(2)}%
-                                </span>
-                              ) : (
-                                <span className="text-[var(--text-muted)]">—</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
-                              {t.totalShares}
-                            </td>
-                            <td className="px-4 py-2">
-                              <span
-                                className={cn(
-                                  "rounded px-1.5 py-0.5 font-mono text-xs",
-                                  t.phase === 1
-                                    ? "bg-[var(--background-elevated)] text-[var(--signal-neutral)]"
-                                    : "bg-[#00D084]/10 text-[#00D084]"
-                                )}
-                              >
-                                Phase {t.phase}
-                              </span>
-                            </td>
-                            <td
-                              className="px-4 py-2"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                onClick={() => setCloseModalTrade(t)}
-                                className="rounded border border-[var(--border-default)] px-2 py-0.5 font-mono text-xs text-[var(--text-secondary)] hover:border-[var(--signal-short)] hover:text-[var(--signal-short)]"
-                              >
-                                Close
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {pendingOrderTrades.map((t) => (
+                        <tr
+                          key={t.tradeId}
+                          className={cn(
+                            "cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]",
+                            t.direction === "long"
+                              ? "border-l-[3px] border-l-[var(--signal-long-muted)]"
+                              : "border-l-[3px] border-l-[var(--signal-short-muted)]"
+                          )}
+                          onClick={() => setDetailTrade(t)}
+                        >
+                          <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">
+                            {t.ticker}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className={cn("font-mono text-xs uppercase", t.direction === "long" ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]")}>
+                              {t.direction}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 font-mono text-xs text-[var(--text-secondary)]">{t.setupType}</td>
+                          <td className="px-4 py-2 font-mono text-xs font-medium text-[var(--signal-neutral)]">{t.grade}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums">{formatCurrency(t.entryPrice)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#FF4D6A]">{formatCurrency(t.stopPrice)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#4dde9e]">{formatCurrency(t.t1Price)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#00D084]">{formatCurrency(t.t2Price)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">{t.t1Qty}+{t.phase2Qty}</td>
+                          <td className="px-4 py-2">
+                            <span className="rounded bg-[var(--background-elevated)] px-1.5 py-0.5 font-mono text-xs text-[var(--text-muted)]">
+                              Phase {t.phase}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 font-mono text-xs text-[var(--text-muted)]">
+                            {new Date(t.submittedAt).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span className="rounded bg-[var(--signal-neutral)]/10 px-2 py-0.5 font-mono text-xs text-[var(--signal-neutral)]">
+                              Awaiting Fill
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-              )}
-            </section>
+              </section>
+            )}
+
+            {/* -------------------------------------------------------------- */}
+            {/* QUEUED TRADES (will submit at next market open)                 */}
+            {/* -------------------------------------------------------------- */}
+            {queuedTrades.length > 0 && (
+              <section>
+                <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                  QUEUED FOR NEXT OPEN
+                  <span className="ml-2 font-normal text-[var(--text-muted)]">
+                    ({queuedTrades.length})
+                  </span>
+                </h2>
+                <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
+                        {["Ticker", "Direction", "Setup", "Grade", "Entry", "Stop", "T1", "T2", "Queued At"].map((h, i) => (
+                          <th key={i} className={thStaticClass}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queuedTrades.map((t) => (
+                        <tr
+                          key={t.tradeId}
+                          className="cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]"
+                          onClick={() => setDetailTrade(t)}
+                        >
+                          <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">{t.ticker}</td>
+                          <td className="px-4 py-2">
+                            <span className={cn("font-mono text-xs uppercase", t.direction === "long" ? "text-[var(--signal-long)]" : "text-[var(--signal-short)]")}>
+                              {t.direction}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 font-mono text-xs text-[var(--text-secondary)]">{t.setupType}</td>
+                          <td className="px-4 py-2 font-mono text-xs font-medium text-[var(--signal-neutral)]">{t.grade}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums">{formatCurrency(t.entryPrice)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#FF4D6A]">{formatCurrency(t.stopPrice)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#4dde9e]">{formatCurrency(t.t1Price)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[#00D084]">{formatCurrency(t.t2Price)}</td>
+                          <td className="px-4 py-2 font-mono text-xs text-[var(--text-muted)]">
+                            {new Date(t.submittedAt).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
 
             {/* -------------------------------------------------------------- */}
             {/* CLOSED TRADES                                                   */}
@@ -1097,14 +1247,15 @@ export function AutoTestingClient() {
                         <th className={thClass} onClick={() => toggleSort("ticker")}>
                           Ticker{sortIndicator("ticker")}
                         </th>
-                        <th className={thStaticClass}>Direction</th>
+                        <th className={thStaticClass}>Dir</th>
                         <th className={thClass} onClick={() => toggleSort("setupType")}>
-                          Setup Type{sortIndicator("setupType")}
+                          Setup{sortIndicator("setupType")}
                         </th>
                         <th className={thClass} onClick={() => toggleSort("grade")}>
                           Grade{sortIndicator("grade")}
                         </th>
                         <th className={thStaticClass}>Entry</th>
+                        <th className={thStaticClass}>Filled @</th>
                         <th className={thStaticClass}>Exit</th>
                         <th className={thClass} onClick={() => toggleSort("pnlDollars")}>
                           $ P&L{sortIndicator("pnlDollars")}
@@ -1112,6 +1263,7 @@ export function AutoTestingClient() {
                         <th className={thClass} onClick={() => toggleSort("pnlPct")}>
                           % P&L{sortIndicator("pnlPct")}
                         </th>
+                        <th className={thStaticClass}>Slip</th>
                         <th className={thStaticClass}>Hold</th>
                         <th className={thClass} onClick={() => toggleSort("outcome")}>
                           Outcome{sortIndicator("outcome")}
@@ -1124,16 +1276,13 @@ export function AutoTestingClient() {
                     <tbody>
                       {sortedClosed.map((t) => {
                         const hasExit = t.exitPrice != null;
+                        const ea = t.filledEntryPrice ?? t.entryPrice;
+                        const qty = t.filledQty ?? t.totalShares;
                         const realizedPnlDollars = hasExit
-                          ? pnlDollars(
-                              t.entryPrice,
-                              t.exitPrice!,
-                              t.totalShares,
-                              t.direction
-                            )
+                          ? pnlDollars(ea, t.exitPrice!, qty, t.direction)
                           : null;
                         const realizedPnlPct = hasExit
-                          ? pnlPercent(t.entryPrice, t.exitPrice!, t.direction)
+                          ? pnlPercent(ea, t.exitPrice!, t.direction)
                           : null;
 
                         return (
@@ -1170,6 +1319,12 @@ export function AutoTestingClient() {
                             </td>
                             <td className="px-4 py-2 font-mono text-xs tabular-nums">
                               {formatCurrency(t.entryPrice)}
+                            </td>
+                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                              {t.filledEntryPrice
+                                ? <span className={Math.abs((t.slippageBps ?? 0)) >= 10 ? "text-[#F5A623]" : ""}>{formatCurrency(t.filledEntryPrice)}</span>
+                                : <span className="text-[var(--text-muted)]">—</span>
+                              }
                             </td>
                             <td className="px-4 py-2 font-mono text-xs tabular-nums">
                               {hasExit ? (
@@ -1208,6 +1363,15 @@ export function AutoTestingClient() {
                                 <span className="text-[var(--text-muted)]">—</span>
                               )}
                             </td>
+                            <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                              {t.slippageBps != null ? (
+                                <span className={Math.abs(t.slippageBps) >= 10 ? "text-[#F5A623]" : "text-[var(--text-muted)]"}>
+                                  {t.slippageBps >= 0 ? "+" : ""}{t.slippageBps}bp
+                                </span>
+                              ) : (
+                                <span className="text-[var(--text-muted)]">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
                               {holdDuration(t.submittedAt, t.closedAt ?? null)}
                             </td>
@@ -1240,9 +1404,206 @@ export function AutoTestingClient() {
                 </div>
               )}
             </section>
+
+            {/* -------------------------------------------------------------- */}
+            {/* PERFORMANCE HISTORY (daily snapshots)                           */}
+            {/* -------------------------------------------------------------- */}
+            {snapshots.length > 0 && (
+              <section>
+                <h2 className="mb-3 font-mono text-sm font-semibold text-[var(--text-secondary)]">
+                  PERFORMANCE HISTORY
+                  <span className="ml-2 font-normal text-[var(--text-muted)]">({snapshots.length} days)</span>
+                </h2>
+                <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
+                        {["Date", "Equity", "Open Trades", "Closed Trades", "Win Rate", "Cumul. P&L"].map((h) => (
+                          <th key={h} className={thStaticClass}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...snapshots].reverse().map((s) => (
+                        <tr key={s.date} className="border-b border-[var(--border-default)] last:border-0">
+                          <td className="px-4 py-2 font-mono text-xs text-[var(--text-primary)]">{s.date}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums">{formatCurrency(s.equity)}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">{s.openTrades}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">{s.closedTrades}</td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                            {s.winRate !== null ? (
+                              <span className={s.winRate >= 0.5 ? "text-[#00D084]" : "text-[#FF4D6A]"}>
+                                {(s.winRate * 100).toFixed(0)}%
+                              </span>
+                            ) : (
+                              <span className="text-[var(--text-muted)]">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                            <span className={s.pnl >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"}>
+                              {s.pnl >= 0 ? "+" : ""}{formatCurrency(s.pnl)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// OPEN POSITIONS TABLE (extracted to keep main render clean)
+// =============================================================================
+
+function OpenPositionsTable({
+  trades,
+  livePriceMap,
+  onDetail,
+  onClose,
+  thStaticClass,
+}: {
+  trades: AlpacaTrade[];
+  livePriceMap: Record<string, number>;
+  onDetail: (t: AlpacaTrade) => void;
+  onClose: (t: AlpacaTrade) => void;
+  thStaticClass: string;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-[var(--border-default)]">
+      <table className="w-full">
+        <thead>
+          <tr className="border-b border-[var(--border-default)] bg-[var(--background-surface)]">
+            {[
+              "Ticker", "Dir", "Setup", "Grade",
+              "Entry", "Current", "Unreal. P&L", "Unreal. %",
+              "Shares", "Phase", "",
+            ].map((h, i) => (
+              <th key={i} className={thStaticClass}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {trades.map((t) => {
+            const livePrice = livePriceMap[t.ticker];
+            const entryForCalc = t.filledEntryPrice ?? t.entryPrice;
+            const currentPrice = livePrice ?? entryForCalc;
+            const hasPx = livePrice != null;
+            const qty = t.filledQty ?? t.totalShares;
+            const uPnlDollars = hasPx
+              ? pnlDollars(entryForCalc, currentPrice, qty, t.direction)
+              : null;
+            const uPnlPct = hasPx
+              ? pnlPercent(entryForCalc, currentPrice, t.direction)
+              : null;
+
+            return (
+              <tr
+                key={t.tradeId}
+                className={cn(
+                  "cursor-pointer border-b border-[var(--border-default)] last:border-0 hover:bg-[var(--background-elevated)]",
+                  t.direction === "long"
+                    ? "border-l-[3px] border-l-[var(--signal-long-muted)]"
+                    : "border-l-[3px] border-l-[var(--signal-short-muted)]"
+                )}
+                onClick={() => onDetail(t)}
+              >
+                <td className="px-4 py-2 font-mono text-sm font-bold text-[var(--signal-neutral)]">
+                  {t.ticker}
+                </td>
+                <td className="px-4 py-2">
+                  <span
+                    className={cn(
+                      "font-mono text-xs uppercase",
+                      t.direction === "long"
+                        ? "text-[var(--signal-long)]"
+                        : "text-[var(--signal-short)]"
+                    )}
+                  >
+                    {t.direction}
+                  </span>
+                </td>
+                <td className="px-4 py-2 font-mono text-xs text-[var(--text-secondary)]">
+                  {t.setupType}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs font-medium text-[var(--signal-neutral)]">
+                  {t.grade}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                  {formatCurrency(entryForCalc)}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                  {hasPx ? (
+                    formatCurrency(currentPrice)
+                  ) : (
+                    <span className="text-[var(--text-muted)]">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                  {uPnlDollars != null ? (
+                    <span
+                      className={
+                        uPnlDollars >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
+                      }
+                    >
+                      {uPnlDollars >= 0 ? "+" : ""}
+                      {formatCurrency(uPnlDollars)}
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                  {uPnlPct != null ? (
+                    <span
+                      className={
+                        uPnlPct >= 0 ? "text-[#00D084]" : "text-[#FF4D6A]"
+                      }
+                    >
+                      {uPnlPct >= 0 ? "+" : ""}
+                      {uPnlPct.toFixed(2)}%
+                    </span>
+                  ) : (
+                    <span className="text-[var(--text-muted)]">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                  {qty}
+                </td>
+                <td className="px-4 py-2">
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-0.5 font-mono text-xs",
+                      t.phase === 1
+                        ? "bg-[var(--background-elevated)] text-[var(--signal-neutral)]"
+                        : "bg-[#00D084]/10 text-[#00D084]"
+                    )}
+                  >
+                    Phase {t.phase}
+                  </span>
+                </td>
+                <td
+                  className="px-4 py-2"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => onClose(t)}
+                    className="rounded border border-[var(--border-default)] px-2 py-0.5 font-mono text-xs text-[var(--text-secondary)] hover:border-[var(--signal-short)] hover:text-[var(--signal-short)]"
+                  >
+                    Close
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
