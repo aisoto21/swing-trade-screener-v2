@@ -18,6 +18,7 @@ export interface AlpacaTrade {
   primaryOrderId: string;  // bracket entry order ID
   t1OrderId: string;       // bracket order ID (take_profit internal) or standalone T1 order
   phase2OrderId?: string;  // OCO order ID for phase 2 (T2 limit + 2% trailing stop)
+  stopOrderId?: string;    // standalone stop loss order ID (used when bracket stop is missing)
   phase: 1 | 2 | "closed";
   // "queued" = submitted while market was closed; "active" = order live on Alpaca; "expired" = stale cleanup; "orphaned" = no matching position or order on Alpaca
   status?: "queued" | "active" | "expired" | "orphaned";
