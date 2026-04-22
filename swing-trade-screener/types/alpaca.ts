@@ -19,8 +19,8 @@ export interface AlpacaTrade {
   t1OrderId: string;       // bracket order ID (take_profit internal) or standalone T1 order
   phase2OrderId?: string;  // OCO order ID for phase 2 (T2 limit + 2% trailing stop)
   phase: 1 | 2 | "closed";
-  // "queued" = submitted while market was closed; "active" = order live on Alpaca; "expired" = stale cleanup
-  status?: "queued" | "active" | "expired";
+  // "queued" = submitted while market was closed; "active" = order live on Alpaca; "expired" = stale cleanup; "orphaned" = no matching position or order on Alpaca
+  status?: "queued" | "active" | "expired" | "orphaned";
   // "alpaca_only" = position exists on Alpaca but no matching Redis record
   source?: "alpaca_only";
   marketRegime?: "bull" | "bear" | "neutral" | null;

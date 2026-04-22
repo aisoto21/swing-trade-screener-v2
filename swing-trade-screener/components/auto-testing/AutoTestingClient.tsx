@@ -619,9 +619,15 @@ export function AutoTestingClient() {
 
   // ── derived state ──────────────────────────────────────────────────────────
 
-  const closedTrades = useMemo(() => trades.filter((t) => t.phase === "closed"), [trades]);
-  const queuedTrades = useMemo(() => trades.filter((t) => t.status === "queued"), [trades]);
-  const nonClosedTrades = useMemo(() => trades.filter((t) => t.phase !== "closed" && t.status !== "queued"), [trades]);
+  // Strip orphaned records first — they pollute every stat and section
+  const activeTrades = useMemo(
+    () => trades.filter((t) => t.status !== "orphaned"),
+    [trades]
+  );
+
+  const closedTrades = useMemo(() => activeTrades.filter((t) => t.phase === "closed"), [activeTrades]);
+  const queuedTrades = useMemo(() => activeTrades.filter((t) => t.status === "queued"), [activeTrades]);
+  const nonClosedTrades = useMemo(() => activeTrades.filter((t) => t.phase !== "closed" && t.status !== "queued"), [activeTrades]);
 
   // [ISSUE 7] Cross-reference Redis trades vs live Alpaca positions
   const alpacaSymbols = useMemo(() => new Set(positions.map((p) => p.symbol)), [positions]);
@@ -636,16 +642,16 @@ export function AutoTestingClient() {
 
   // [ISSUE 8] Alpaca positions not in Redis → synthetic "alpaca_only" records
   const alpacaOnlyPositions = useMemo(
-    () => positions.filter((p) => !trades.some((t) => t.ticker === p.symbol && t.phase !== "closed")),
-    [positions, trades]
+    () => positions.filter((p) => !activeTrades.some((t) => t.ticker === p.symbol && t.phase !== "closed")),
+    [positions, activeTrades]
   );
 
   // Today's activity
   const todayPrefix = new Date().toISOString().slice(0, 10);
   const todayTrades = useMemo(
-    () => trades.filter((t) => t.submittedAt.startsWith(todayPrefix)),
+    () => activeTrades.filter((t) => t.submittedAt.startsWith(todayPrefix)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [trades]
+    [activeTrades]
   );
   const todayClosed = useMemo(
     () => todayTrades.filter((t) => t.phase === "closed"),
@@ -686,7 +692,7 @@ export function AutoTestingClient() {
 
   // Average slippage across all trades that have it
   const avgSlippageBps = useMemo(() => {
-    const withSlippage = trades.filter((t) => t.slippageBps != null);
+    const withSlippage = activeTrades.filter((t) => t.slippageBps != null);
     if (withSlippage.length === 0) return null;
     return withSlippage.reduce((sum, t) => sum + (t.slippageBps ?? 0), 0) / withSlippage.length;
   }, [trades]);
@@ -906,7 +912,7 @@ export function AutoTestingClient() {
                 <StatCard
                   label="Total Closed"
                   value={String(stats.totalTrades)}
-                  sub={`${trades.filter(t => t.phase !== "closed").length} still active`}
+                  sub={`${activeTrades.filter(t => t.phase !== "closed").length} still active`}
                 />
                 <StatCard
                   label="Win Rate"
